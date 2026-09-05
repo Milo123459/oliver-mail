@@ -1,11 +1,14 @@
 use gpui::{
-    App, Context, Window, WindowOptions, div, prelude::*, px,
+    App, Entity, Context, Window, WindowOptions, div, prelude::*, px,
     rgb, size,
 };
 
 use crate::ui::{TopBar, Sidebar};
 
-pub struct MailApp;
+pub struct MailApp {
+    sidebar: Entity<Sidebar>,
+    topbar: Entity<TopBar>,
+}
 
 impl MailApp {
     pub fn open(cx: &mut App) {
@@ -26,7 +29,15 @@ impl MailApp {
                 )),
                 ..Default::default()
             },
-            |_, cx| cx.new(|_| Self),
+            |_, cx| {
+                let sidebar = cx.new(|_| Sidebar);
+                let topbar = cx.new(|_| TopBar);
+
+                cx.new(|_| MailApp {
+                    sidebar,
+                    topbar,
+                })
+            },
         )
         .unwrap();
     }
@@ -40,12 +51,13 @@ impl Render for MailApp {
             .bg(rgb(0x000000))
             .text_color(rgb(0xffffff))
             .font_family("Lilex")
+            .child(self.sidebar.clone())
             .child(
                 div()
                     .flex_1()
                     .flex()
-                    .child(_cx.new(|_| Sidebar))
-                    .child(_cx.new(|_| TopBar)),
+                    .flex_col()
+                    .child(self.topbar.clone()),
             )
     }
 }
