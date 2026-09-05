@@ -2,10 +2,11 @@ use gpui::{
     div, prelude::*, px, rgb, Window
 };
 
+use crate::models::create_account;
 pub struct Sidebar;
 
 impl Render for Sidebar {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .w(px(220.0))
             .h_full()
@@ -20,6 +21,31 @@ impl Render for Sidebar {
                     .text_size(px(24.0))
                     .mb(px(20.0))
                     .child("Mail"),
+            )
+            .child(
+                div()
+                    .id("generate-email")
+                    .p(px(10.0))
+                    .bg(rgb(0x222222))
+                    .cursor_pointer()
+                    .on_click(cx.listener(|_this, _event, _window, cx| {
+                        println!("Generate temporary email clicked!");
+
+                        cx.spawn(async move |_this, _cx| {
+                            match create_account().await {
+                                Ok(email) => {
+                                    println!("Created: {} {}", email.address, email.password);
+                                }
+                                Err(error) => {
+                                    println!("Failed: {}", error);
+                                }
+                            }
+
+                            Ok::<(), anyhow::Error>(())
+                        })
+                        .detach();  
+                    }))
+                    .child("generate temporary email"),
             )
             .child(
                 div()
