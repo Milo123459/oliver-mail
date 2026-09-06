@@ -1,5 +1,5 @@
 use gpui::{
-    div, prelude::*, px, rgb, Window
+    div, prelude::*, px, rgb, Window, svg
 };
 
 use crate::models::create_account;
@@ -8,57 +8,134 @@ pub struct Sidebar;
 impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .w(px(220.0))
+            .w(px(360.0))
             .h_full()
             .flex()
             .flex_col()
-            .gap(px(8.0))
-            .border_r(px(1.0))
-            .border_color(rgb(0x222222))
-            .child(
-                div()
-                    .p(px(20.0))
-                    .text_size(px(24.0))
-                    .mb(px(20.0))
-                    .child("Mail"),
-            )
-            .child(
-                div()
-                    .id("generate-email")
-                    .p(px(10.0))
-                    .bg(rgb(0x222222))
-                    .cursor_pointer()
-                    .on_click(cx.listener(|_this, _event, _window, cx| {
-                        println!("Generate temporary email clicked!");
+            .bg(rgb(0x111111))
+            .border_l(px(1.0))
+            .border_color(rgb(0x2a2a2a))
 
-                        cx.spawn(async move |_this, _cx| {
-                            match create_account().await {
-                                Ok(email) => {
-                                    println!("Created: {} {}", email.address, email.password);
-                                }
-                                Err(error) => {
-                                    println!("Failed: {}", error);
-                                }
-                            }
+            /* Header
+            .child(
+                div()
+                    .w_full()
+                    .h(px(55.0))
+                    .px(px(16.0))
+                    .flex()
+                    .items_center()
+                    .border_b(px(1.0))
+                    .border_color(rgb(0x2a2a2a))
+                    .child(
+                        div()
+                            .text_size(px(22.0))
+                            .text_color(rgb(0xffffff))
+                            .child("Mail"),
+                    ),
+            ) */
 
-                            Ok::<(), anyhow::Error>(())
-                        })
-                        .detach();  
-                    }))
-                    .child("generate temporary email"),
-            )
+            // Mail section
             .child(
                 div()
-                    .p(px(10.0))
-                    //.rounded(px(8.0))
-                    .bg(rgb(0x222222))
-                    .child("oliver@gmail.com"),
+                    .w_full()
+                    .px(px(14.0))
+                    .py(px(12.0))
+
+                    // Mail title
+                    .child(
+                        div()
+                            .h(px(30.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                svg()
+                                    .path(include_str!("../assets/images/email.svg"))
+                                    .w(px(18.0))
+                                    .h(px(18.0))
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(14.0))
+                                    .text_color(rgb(0xffffff))
+                                    .child("Mail")
+                            )
+                    )
+                    // Tree
+                    .child(
+                        div()
+                            .ml(px(8.0))
+                            .pl(px(14.0))
+                            .border_l(px(1.0))
+                            .border_color(rgb(0x3a3a3a))
+
+                            .child(
+                                div()
+                                    .px(px(8.0))
+                                    .py(px(6.0))
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(0xaaaaaa))
+                                    .child("oliver@gmail.com"),
+                            )
+
+                            .child(
+                                div()
+                                    .px(px(8.0))
+                                    .py(px(6.0))
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(0xaaaaaa))
+                                    .child("rem@googlemail.com"),
+                            ),
+                    ),
             )
+
+            // Temp Emails section
             .child(
                 div()
-                    .p(px(10.0))
-                    .child("example@work"),
+                    .w_full()
+                    .px(px(14.0))
+                    .py(px(12.0))
+
+                    // Temp Emails title
+                    .child(
+                        div()
+                            .h(px(30.0))
+                            .flex()
+                            .items_center()
+                            .text_size(px(14.0))
+                            .text_color(rgb(0xffffff))
+                            .child("Temp Emails"),
+                    )
+
+                    // Tree
+                    .child(
+                        div()
+                            .ml(px(8.0))
+                            .pl(px(14.0))
+                            .border_l(px(1.0))
+                            .border_color(rgb(0x3a3a3a))
+
+                            .child(
+                                div()
+                                    .px(px(8.0))
+                                    .py(px(6.0))
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(0xaaaaaa))
+                                    .bg(rgb(0x181818))
+                                    .child("metropolitanemelyne@web-library.net"),
+                            )
+
+                            .child(
+                                div()
+                                    .px(px(8.0))
+                                    .py(px(6.0))
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(0xaaaaaa))
+                                    .child("email2@mail.tm"),
+                            ),
+                    ),
             )
+
             .into_any_element()
     }
 }

@@ -1,6 +1,46 @@
 use reqwest::Client;
 use rand::{distr::Alphanumeric, Rng};
+use serde::Deserialize;
 use serde_json::json;
+
+#[derive(Clone, Debug)]
+pub struct Email {
+    pub id: String,
+    pub from: String,
+    pub subject: String,
+    pub intro: String,
+    pub seen: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MessagesResponse {
+    #[serde(rename = "hydra:member")]
+    messages: Vec<Message>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Message {
+    id: String,
+    from: MessageFrom,
+    subject: String,
+    intro: Option<String>,
+    seen: bool,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+}
+
+
+#[derive(Debug, Deserialize)]
+struct MessageFrom {
+    address: String,
+}
+
+
+#[derive(Debug, Deserialize)]
+struct TokenResponse {
+    token: String,
+}
 
 #[derive(Clone, Debug)]
 pub struct TempEmail {
@@ -43,4 +83,58 @@ pub async fn create_account() -> Result<TempEmail, Box<dyn std::error::Error>> {
         address,
         password,
     })
+}
+
+async fn get_token(client: &Client, email: &TempEmail) -> Result<String, Box<dyn std::error::Error>> {
+    let response = client.post("https://api.mail.tm/token")
+        .json(&json!({
+            "address": email.address,
+            "password": email.password
+        })).send().await?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to login to Mail.tm: {} - {}",
+            response.status(),
+            response.text().await?
+        )
+        .into());
+    }
+
+    let token: TokenResponse = response.json().await?;
+
+    Ok(token.token)
+}
+
+pub async fn get_mail(email: &TempEmail) -> Result<Vec<Email>, Box<dyn std::error::Error>> {
+    let client = Client::new();
+    let token = get_token(&client, email).await?;
+
+    let response = client.get("https://api.mail.tm/messages").bearer_auth(&token).send().await?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to retrieve mail: {} - {}",
+            response.status(),
+            response.text().await?
+        )
+        .into());
+    }
+
+    let messages: MessagesResponse = response.json().await?;
+
+    let emails = messages
+        .messages
+        .into_iter()
+        .map(|message| Email {
+            id: message.id,
+            from: message.from.address,
+            subject: message.subject,
+            intro: message.intro.unwrap_or_default(),
+            seen: message.seen,
+            created_at: message.created_at,
+        })
+        .collect();
+
+    Ok(emails)
 }
