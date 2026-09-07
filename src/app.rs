@@ -1,15 +1,17 @@
-use gpui::{
-    App, Entity, Context, Window, WindowOptions, div, prelude::*, px,
-    rgb, size,
+use gpui::{App, Context, Entity, Global, Window, WindowOptions, div, prelude::*, px, rgb, size};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
 };
 
-use crate::models::{TempEmail};
-use crate::ui::{TopBar, Sidebar, Inbox};
+use crate::models::TempEmail;
+use crate::ui::{Inbox, Sidebar, TopBar};
 
 pub struct MailApp {
-    sidebar: Entity<Sidebar>,
-    topbar: Entity<TopBar>,
-    inbox: Entity<Inbox>,
+    pub sidebar: Entity<Sidebar>,
+    pub topbar: Entity<TopBar>,
+    pub inbox: Entity<Inbox>,
+    pub temp_email: Option<TempEmail>
 }
 
 impl MailApp {
@@ -22,26 +24,18 @@ impl MailApp {
 
         cx.open_window(
             WindowOptions {
-                window_bounds: Some(gpui::WindowBounds::Windowed(
-                    gpui::Bounds::centered(
-                        None, 
-                        size(px(1200.0), 
-                        px(800.0)), 
-                        cx),
-                )),
+                window_bounds: Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
+                    None,
+                    size(px(1200.0), px(800.0)),
+                    cx,
+                ))),
                 ..Default::default()
             },
             |_, cx| {
                 let sidebar = cx.new(|_| Sidebar);
                 let topbar = cx.new(|_| TopBar);
 
-                let account = TempEmail {
-                    address: "metropolitanemelyne@web-library.net".to_string(),
-                    password: "evC*I<<>#w".to_string(),
-                };
-
                 let inbox = cx.new(|_| Inbox {
-                    account,
                     emails: Vec::new(),
                     loading: false,
                 });
@@ -62,11 +56,7 @@ impl MailApp {
 }
 
 impl Render for MailApp {
-    fn render(
-        &mut self,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
             .bg(rgb(0x000000))
@@ -74,17 +64,14 @@ impl Render for MailApp {
             .font_family("Lilex")
             .flex()
             .flex_col()
-
             .child(self.topbar.clone())
-            
             .child(
                 div()
                     .flex_1()
                     .w_full()
                     .flex()
-
                     .child(self.inbox.clone())
-                    .child(self.sidebar.clone())
+                    .child(self.sidebar.clone()),
             )
     }
 }

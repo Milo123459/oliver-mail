@@ -1,9 +1,9 @@
-use gpui::{
-    div, prelude::*, px, rgb, Window, svg
-};
+use gpui::{Window, div, prelude::*, px, rgb, svg, Entity};
 
 use crate::models::create_account;
-pub struct Sidebar;
+pub struct Sidebar {
+    pub mail_app: Entity<crate::MailApp>
+}
 
 impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -15,7 +15,6 @@ impl Render for Sidebar {
             .bg(rgb(0x111111))
             .border_l(px(1.0))
             .border_color(rgb(0x2a2a2a))
-
             /* Header
             .child(
                 div()
@@ -33,14 +32,12 @@ impl Render for Sidebar {
                             .child("Mail"),
                     ),
             ) */
-
             // Mail section
             .child(
                 div()
                     .w_full()
                     .px(px(14.0))
                     .py(px(12.0))
-
                     // Mail title
                     .child(
                         div()
@@ -52,14 +49,14 @@ impl Render for Sidebar {
                                 svg()
                                     .path(include_str!("../assets/images/email.svg"))
                                     .w(px(18.0))
-                                    .h(px(18.0))
+                                    .h(px(18.0)),
                             )
                             .child(
                                 div()
                                     .text_size(px(14.0))
                                     .text_color(rgb(0xffffff))
-                                    .child("Mail")
-                            )
+                                    .child("Mail"),
+                            ),
                     )
                     // Tree
                     .child(
@@ -68,7 +65,6 @@ impl Render for Sidebar {
                             .pl(px(14.0))
                             .border_l(px(1.0))
                             .border_color(rgb(0x3a3a3a))
-
                             .child(
                                 div()
                                     .px(px(8.0))
@@ -77,7 +73,6 @@ impl Render for Sidebar {
                                     .text_color(rgb(0xaaaaaa))
                                     .child("oliver@gmail.com"),
                             )
-
                             .child(
                                 div()
                                     .px(px(8.0))
@@ -88,14 +83,12 @@ impl Render for Sidebar {
                             ),
                     ),
             )
-
             // Temp Emails section
             .child(
                 div()
                     .w_full()
                     .px(px(14.0))
                     .py(px(12.0))
-
                     // Temp Emails title
                     .child(
                         div()
@@ -106,7 +99,6 @@ impl Render for Sidebar {
                             .text_color(rgb(0xffffff))
                             .child("Temp Emails"),
                     )
-
                     // Tree
                     .child(
                         div()
@@ -114,7 +106,6 @@ impl Render for Sidebar {
                             .pl(px(14.0))
                             .border_l(px(1.0))
                             .border_color(rgb(0x3a3a3a))
-
                             .child(
                                 div()
                                     .px(px(8.0))
@@ -124,7 +115,6 @@ impl Render for Sidebar {
                                     .bg(rgb(0x181818))
                                     .child("metropolitanemelyne@web-library.net"),
                             )
-
                             .child(
                                 div()
                                     .px(px(8.0))
@@ -135,7 +125,37 @@ impl Render for Sidebar {
                             ),
                     ),
             )
+            .child(
+                div()
+                    .id("generate-email")
+                    .p(px(10.0))
+                    .bg(rgb(0x222222))
+                    .cursor_pointer()
+                    .on_click(cx.listener(|_this, _event, _window, cx| {
+                        println!("Generate temporary email clicked!");
 
+                        cx.spawn(async move |_this, cx2| {
+                            match create_account().await {
+                                Ok(email) => {
+                                    cx2.update(|cx| {
+                                        cx.set_global::<crate::app::TempEmailToken>(
+                                            TempEmailToken(std::sync::Arc::new(email.clone())),
+                                        );
+                                        cx.notify(entity_id);
+                                    });
+                                    println!("Created: {} {}", email.address, email.password);
+                                }
+                                Err(error) => {
+                                    println!("Failed: {}", error);
+                                }
+                            }
+
+                            Ok::<(), anyhow::Error>(())
+                        })
+                        .detach();
+                    }))
+                    .child("generate temporary email"),
+            )
             .into_any_element()
     }
 }

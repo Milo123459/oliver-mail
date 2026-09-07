@@ -1,6 +1,6 @@
 mod app;
-mod ui;
 mod models;
+mod ui;
 
 use app::MailApp;
 use gpui_platform::application;

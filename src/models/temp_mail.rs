@@ -1,5 +1,5 @@
+use rand::{Rng, distr::Alphanumeric};
 use reqwest::Client;
-use rand::{distr::Alphanumeric, Rng};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -30,12 +30,10 @@ struct Message {
     created_at: String,
 }
 
-
 #[derive(Debug, Deserialize)]
 struct MessageFrom {
     address: String,
 }
-
 
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
@@ -49,7 +47,11 @@ pub struct TempEmail {
 }
 
 fn random_string(length: usize) -> String {
-    rand::rng().sample_iter(&Alphanumeric).take(length).map(char::from).collect()
+    rand::rng()
+        .sample_iter(&Alphanumeric)
+        .take(length)
+        .map(char::from)
+        .collect()
 }
 
 pub async fn create_account() -> Result<TempEmail, Box<dyn std::error::Error>> {
@@ -60,37 +62,42 @@ pub async fn create_account() -> Result<TempEmail, Box<dyn std::error::Error>> {
 
     let domains_response = client.get("https://api.mail.tm/domains").send().await?;
     let domains: serde_json::Value = domains_response.json().await?;
-    let domain = domains["hydra:member"][0]["domain"].as_str().ok_or("No domain available")?;
+    let domain = domains["hydra:member"][0]["domain"]
+        .as_str()
+        .ok_or("No domain available")?;
 
     let address = format!("{}@{}", username, domain);
 
-    let response = client.post("https://api.mail.tm/accounts").json(&json!({"address": address,"password": password})).send().await?;
+    let response = client
+        .post("https://api.mail.tm/accounts")
+        .json(&json!({"address": address,"password": password}))
+        .send()
+        .await?;
 
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await?;
 
-        return Err(format!(
-            "Failed to create account: {} - {}",
-            status, body
-        )
-        .into());
+        return Err(format!("Failed to create account: {} - {}", status, body).into());
     }
 
     println!("Temporary email created: {}", address);
 
-    Ok(TempEmail {
-        address,
-        password,
-    })
+    Ok(TempEmail { address, password })
 }
 
-async fn get_token(client: &Client, email: &TempEmail) -> Result<String, Box<dyn std::error::Error>> {
-    let response = client.post("https://api.mail.tm/token")
+async fn get_token(
+    client: &Client,
+    email: &TempEmail,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let response = client
+        .post("https://api.mail.tm/token")
         .json(&json!({
             "address": email.address,
             "password": email.password
-        })).send().await?;
+        }))
+        .send()
+        .await?;
 
     if !response.status().is_success() {
         return Err(format!(
@@ -110,7 +117,11 @@ pub async fn get_mail(email: &TempEmail) -> Result<Vec<Email>, Box<dyn std::erro
     let client = Client::new();
     let token = get_token(&client, email).await?;
 
-    let response = client.get("https://api.mail.tm/messages").bearer_auth(&token).send().await?;
+    let response = client
+        .get("https://api.mail.tm/messages")
+        .bearer_auth(&token)
+        .send()
+        .await?;
 
     if !response.status().is_success() {
         return Err(format!(

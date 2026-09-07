@@ -1,7 +1,7 @@
-mod topbar;
-mod sidebar;
 mod inbox;
+mod sidebar;
+mod topbar;
 
-pub use topbar::TopBar;
-pub use sidebar::Sidebar;
 pub use inbox::Inbox;
+pub use sidebar::Sidebar;
+pub use topbar::TopBar;
