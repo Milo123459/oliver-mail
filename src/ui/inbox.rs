@@ -13,7 +13,6 @@ pub struct Inbox {
 
 impl Inbox {
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        dbg!(self.state.read(cx).temp_email.clone());
         self.loading = true;
 
         cx.notify();
@@ -58,9 +57,7 @@ impl Inbox {
 
 impl Inbox {
     pub fn new(state: Entity<crate::app::AppState>, cx: &mut Context<Self>) -> Inbox {
-        println!("Inbox observing state: {:?}", state.entity_id());
         cx.observe(&state, |this, state, cx| {
-            dbg!("observing");
             if state.read(cx).temp_email.is_some() {
                 this.refresh(cx);
             }

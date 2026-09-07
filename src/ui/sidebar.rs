@@ -151,8 +151,6 @@ impl Render for Sidebar {
                                         });
                                         thecx.notify();
                                     });
-                                    dbg!("updated", app_state.entity_id());
-                                    // println!("Created: {} {}", email.address, email.password);
                                 }
                                 Err(error) => {
                                     println!("Failed: {}", error);
