@@ -1,22 +1,27 @@
 use crate::app::AppState;
 use crate::models::{Email, Theme, get_mail};
 use crate::ui::EmailView;
+use futures_util::StreamExt;
 use gpui::{Context, Entity, Render, Task, Window, div, prelude::*, px, rgb};
 use reqwest_eventsource::{Event, EventSource};
-use futures_util::StreamExt;
 
 pub struct Inbox {
     pub emails: Vec<Email>,
     pub loading: bool,
     pub state: Entity<AppState>,
-    pub theme: Theme,
+    pub theme: Entity<Theme>,
     pub email_view: Entity<EmailView>,
     mail_task: Option<Task<Result<(), anyhow::Error>>>,
     active_account_id: Option<String>,
 }
 
 impl Inbox {
-    pub fn new(state: Entity<AppState>, email_view: Entity<EmailView>, theme: Theme, cx: &mut Context<Self>) -> Inbox {
+    pub fn new(
+        state: Entity<AppState>,
+        email_view: Entity<EmailView>,
+        theme: Entity<Theme>,
+        cx: &mut Context<Self>,
+    ) -> Inbox {
         let inbox = Self {
             emails: Vec::new(),
             loading: false,
@@ -27,11 +32,14 @@ impl Inbox {
             active_account_id: None,
         };
 
-        cx.observe(&state, |this , state, cx| {
+        cx.observe(&state, |this, state, cx| {
             let account = {
                 let state = state.read(cx);
 
-                state.selected_email.and_then(|index| state.temp_email.get(index)).cloned()
+                state
+                    .selected_email
+                    .and_then(|index| state.temp_email.get(index))
+                    .cloned()
             };
 
             if let Some(account) = account {
@@ -90,20 +98,23 @@ impl Inbox {
                 }
             }
 
-            let url = format!("https://mercure.mail.tm/.well-known/mercure?topic=/accounts/{}", account.id);
+            let url = format!(
+                "https://mercure.mail.tm/.well-known/mercure?topic=/accounts/{}",
+                account.id
+            );
 
             println!("Conntecting to Mercure..");
             println!("Topic: /accounts/{}", account.id);
 
             let client = reqwest::Client::new();
 
-            let request = client.get(&url).header(
-                reqwest::header::AUTHORIZATION,
-                format!("Bearer {}", account.token)
-            ).header(
-                reqwest::header::ACCEPT,
-                "text/event-stream"
-            );
+            let request = client
+                .get(&url)
+                .header(
+                    reqwest::header::AUTHORIZATION,
+                    format!("Bearer {}", account.token),
+                )
+                .header(reqwest::header::ACCEPT, "text/event-stream");
 
             let mut events = EventSource::new(request)?;
 
@@ -147,7 +158,11 @@ impl Inbox {
 
     fn merge_emails(&mut self, emails: Vec<Email>) {
         for email in emails {
-            if let Some(existing) = self.emails.iter_mut().find(|existing| existing.id == email.id) {
+            if let Some(existing) = self
+                .emails
+                .iter_mut()
+                .find(|existing| existing.id == email.id)
+            {
                 *existing = email;
             } else {
                 self.emails.push(email);
@@ -161,13 +176,13 @@ impl Inbox {
 
 impl Render for Inbox {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = self.theme.read(cx).clone();
         div()
             .w_full()
             .h_full()
-            .bg(rgb(Theme::color(&self.theme.inbox_background)))
+            .bg(rgb(Theme::color(&theme.background)))
             .flex()
             .flex_col()
-  
             /*.child(
                 div()
                     .w_full()
@@ -176,11 +191,11 @@ impl Render for Inbox {
                     .flex()
                     .items_center()
                     .border_b_1()
-                    .border_color(rgb(Theme::color(&self.theme.inbox_header_border)))
+                    .border_color(rgb(Theme::color(&theme.border)))
                     .child(
                         div()
                             .text_size(px(20.0))
-                            .text_color(rgb(Theme::color(&self.theme.inbox_header_text)))
+                            .text_color(rgb(Theme::color(&theme.text)))
                             .child(format!(
                                 "Inbox - {}",
                                 self.state.read(cx).selected_email.and_then(|index| {
@@ -190,33 +205,24 @@ impl Render for Inbox {
                             )),
                     )
             )*/
-
             .child(
                 div()
                     .w_full()
                     .flex_1()
                     .flex()
                     .flex_col()
-
                     .when(self.state.read(cx).selected_email.is_none(), |this| {
-                        this
-                        .items_center()
-                        .justify_center()
-                        .child(
+                        this.items_center().justify_center().child(
                             div()
                                 .text_size(px(14.0))
                                 .text_color(rgb(0x777777))
                                 .child("Select an inbox"),
                         )
                     })
-
-
                     .when(
-                        self.state.read(cx).selected_email.is_some() && self.emails.is_empty(),|this| {
-                            this
-                            .items_center()
-                            .justify_center()
-                            .child(
+                        self.state.read(cx).selected_email.is_some() && self.emails.is_empty(),
+                        |this| {
+                            this.items_center().justify_center().child(
                                 div()
                                     .text_size(px(14.0))
                                     .text_color(rgb(0x777777))
@@ -224,64 +230,62 @@ impl Render for Inbox {
                             )
                         },
                     )
+                    .when(
+                        self.state.read(cx).selected_email.is_some() && !self.emails.is_empty(),
+                        |this| {
+                            this.children(self.emails.iter().map(|email| {
+                                div()
+                                    .w_full()
+                                    .h(px(64.0))
+                                    .px(px(24.0))
+                                    .flex()
+                                    .items_center()
+                                    .border_b_1()
+                                    .border_color(rgb(Theme::color(&theme.border)))
+                                    .id(format!("email-{}", email.id))
+                                    .cursor_pointer()
+                                    .on_click({
+                                        let state = self.state.clone();
+                                        let email_view = self.email_view.clone();
+                                        let email = email.clone();
 
-                    .when(self.state.read(cx).selected_email.is_some() && !self.emails.is_empty(),|this| {
-                        this.children(self.emails.iter().map(|email| {
-                            div()
-                                .w_full()
-                                .h(px(64.0))
-                                .px(px(24.0))
-                                .flex()
-                                .items_center()
-                                .border_b_1()
-                                .border_color(rgb(Theme::color(&self.theme.inbox_border)))
-                                .id(format!("email-{}", email.id))
-                                .cursor_pointer()
-                                
-                                .on_click({
-                                    let state = self.state.clone();
-                                    let email_view = self.email_view.clone();
-                                    let email = email.clone();
-                                    
-                                    move |_event, _window, cx| {
-                                        email_view.update(cx, |email_view, _cx| {
-                                            email_view.email = Some(email.clone());
-                                        });
-                                        state.update(cx, |state, cx| {
-                                            state.selected_message = Some(email.clone());
-                                            cx.notify();
-                                        });
-                                    }
-                                })
-
-                                // Sender
-                                .child(
-                                    div()
-                                        .w(px(400.0))
-                                        .text_size(px(14.0))
-                                        .text_color(rgb(Theme::color(&self.theme.inbox_text)))
-                                        .child(email.from.clone()),
-                                )
-
-                                // Subject
-                                .child(
-                                    div()
-                                        .ml_auto()
-                                        .text_size(px(14.0))
-                                        .text_color(rgb(Theme::color(&self.theme.inbox_text)))
-                                        .child(email.subject.clone()),
-                                )
-
-                                // Date
-                                /*.child(
-                                    div()
-                                        .w(px(100.0))
-                                        .text_color(rgb(0x777777))
-                                        .child(email.created_at.clone())
-                                )*/
-                                .into_any_element()
-                        }))
-                    }),
+                                        move |_event, _window, cx| {
+                                            email_view.update(cx, |email_view, _cx| {
+                                                email_view.email = Some(email.clone());
+                                            });
+                                            state.update(cx, |state, cx| {
+                                                state.selected_message = Some(email.clone());
+                                                cx.notify();
+                                            });
+                                        }
+                                    })
+                                    // Sender
+                                    .child(
+                                        div()
+                                            .w(px(400.0))
+                                            .text_size(px(14.0))
+                                            .text_color(rgb(Theme::color(&theme.text_muted)))
+                                            .child(email.from.clone()),
+                                    )
+                                    // Subject
+                                    .child(
+                                        div()
+                                            .ml_auto()
+                                            .text_size(px(14.0))
+                                            .text_color(rgb(Theme::color(&theme.text_muted)))
+                                            .child(email.subject.clone()),
+                                    )
+                                    // Date
+                                    /*.child(
+                                        div()
+                                            .w(px(100.0))
+                                            .text_color(rgb(0x777777))
+                                            .child(email.created_at.clone())
+                                    )*/
+                                    .into_any_element()
+                            }))
+                        },
+                    ),
             )
     }
 }

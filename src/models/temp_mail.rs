@@ -45,7 +45,7 @@ pub struct TempEmail {
     pub address: String,
     pub password: String,
     pub id: String,
-    pub token: String
+    pub token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -102,29 +102,16 @@ pub async fn create_account() -> Result<TempEmail, Box<dyn std::error::Error>> {
         let status = token_response.status();
         let body = token_response.text().await?;
 
-        return Err(format!(
-            "Failed to login to Mail.tm: {} - {}",
-            status,
-            body
-        )
-        .into());
+        return Err(format!("Failed to login to Mail.tm: {} - {}", status, body).into());
     }
 
     let account: AccountResponse = response.json().await?;
 
-    println!(
-        "Temporary email created: {}",
-        account.address
-    );
+    println!("Temporary email created: {}", account.address);
 
-    println!(
-        "Account ID: {}",
-        account.id
-    );
+    println!("Account ID: {}", account.id);
 
-    let token: TokenResponse = token_response
-        .json()
-        .await?;
+    let token: TokenResponse = token_response.json().await?;
 
     println!("Mail.tm token acquired");
 
