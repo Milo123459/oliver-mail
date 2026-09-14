@@ -2,7 +2,7 @@ use gpui::{
     App, Context, Entity, TitlebarOptions, Window, WindowOptions, div, prelude::*, px, rgb, size,
 };
 
-use crate::models::{Email, TempEmail, Theme};
+use crate::models::{Email, GoogleAccount, TempEmail, Theme};
 use crate::ui::{EmailView, Inbox, MailTopBar, Sidebar, TopBar};
 
 pub struct MailApp {
@@ -18,14 +18,17 @@ pub struct MailApp {
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub temp_email: Vec<TempEmail>,
+    pub google_accounts: Vec<GoogleAccount>,
     pub selected_email: Option<usize>,
     pub selected_message: Option<Email>,
     pub selected_sidebar_email: Option<SidebarEmail>,
+    pub google_login_status: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidebarEmail {
     Mail(usize),
+    Google(usize),
     Temp(usize),
 }
 
@@ -57,9 +60,11 @@ impl MailApp {
                 let theme = cx.new(|_| Theme::load());
                 let state = cx.new(|_| AppState {
                     temp_email: Vec::new(),
+                    google_accounts: Vec::new(),
                     selected_email: None,
                     selected_message: None,
                     selected_sidebar_email: None,
+                    google_login_status: None,
                 });
                 let sidebar = cx.new(|_| Sidebar {
                     state: state.clone(),
@@ -113,13 +118,16 @@ impl Render for MailApp {
                 div()
                     .flex_1()
                     .w_full()
+                    .min_h(px(0.0))
                     .flex()
                     .child(
                         div()
                             .flex_1()
+                            .min_w(px(0.0))
+                            .min_h(px(0.0))
                             .flex_col()
                             .child(self.mailtopbar.clone())
-                            .child(div().flex_1().w_full().child(content)),
+                            .child(div().flex_1().w_full().min_h(px(0.0)).child(content)),
                     )
                     .child(self.sidebar.clone()),
             )

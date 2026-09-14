@@ -9,6 +9,7 @@ pub struct Email {
     pub from: String,
     pub subject: String,
     pub intro: String,
+    pub body: String,
     pub seen: bool,
     pub created_at: String,
 }
@@ -179,6 +180,7 @@ pub async fn get_mail(email: &TempEmail) -> Result<Vec<Email>, Box<dyn std::erro
             from: message.from.address,
             subject: message.subject,
             intro: message.intro.unwrap_or_default(),
+            body: String::new(),
             seen: message.seen,
             created_at: message.created_at,
         })

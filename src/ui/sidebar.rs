@@ -1,7 +1,7 @@
 use gpui::{Entity, Window, div, prelude::*, px, rgb, svg};
 
 use crate::app::SidebarEmail;
-use crate::models::{Theme, create_account};
+use crate::models::{Theme, create_account, login};
 pub struct Sidebar {
     pub state: Entity<crate::app::AppState>,
     pub theme: Entity<Theme>,
@@ -10,10 +10,10 @@ pub struct Sidebar {
 impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, root_cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme.read(root_cx).clone();
-        let app_state = self.state.clone();
-        let mail_account_0_state = self.state.clone();
-        let mail_account_1_state = self.state.clone();
+        let temp_email_state = self.state.clone();
+        let google_state = self.state.clone();
         let selected_sidebar_email = self.state.read(root_cx).selected_sidebar_email;
+        let google_accounts = self.state.read(root_cx).google_accounts.clone();
         let temporary_emails = self
             .state
             .read(root_cx)
@@ -53,6 +53,7 @@ impl Render for Sidebar {
 
         div()
             .w(px(360.0))
+            .flex_shrink_0()
             .h_full()
             .flex()
             .flex_col()
@@ -84,6 +85,51 @@ impl Render for Sidebar {
                                     .hover(|this| {
                                         this.bg(rgb(Theme::color(&theme.selected_option)))
                                     })
+                                    .id("add-email")
+                                    .cursor_pointer()
+                                    .on_click(root_cx.listener(
+                                        move |_this, _event, _window, cx| {
+                                            let google_state = google_state.clone();
+                                            if google_state
+                                                .read(cx)
+                                                .google_login_status
+                                                .as_deref()
+                                                == Some("Opening Google login...")
+                                            {
+                                                return;
+                                            }
+                                            google_state.update(cx, |state, cx| {
+                                                state.google_login_status =
+                                                    Some("Opening Google login...".to_string());
+                                                cx.notify();
+                                            });
+                                            cx.spawn(async move |_this, cx2| {
+                                                match login().await {
+                                                    Ok(account) => {
+                                                        google_state.update(cx2, |state, cx| {
+                                                            state.google_accounts.push(account);
+                                                            state.google_login_status = None;
+                                                            state.selected_sidebar_email =
+                                                                Some(SidebarEmail::Google(
+                                                                    state.google_accounts.len() - 1,
+                                                                ));
+                                                            cx.notify();
+                                                        });
+                                                    }
+                                                    Err(error) => {
+                                                        google_state.update(cx2, |state, cx| {
+                                                            state.google_login_status =
+                                                                Some(format!("Google login failed: {error:#}"));
+                                                            cx.notify();
+                                                        });
+                                                        eprintln!("Google login failed: {error:#}");
+                                                    }
+                                                }
+                                                Ok::<(), anyhow::Error>(())
+                                            })
+                                            .detach();
+                                        },
+                                    ))
                                     .child(
                                         svg()
                                             .data(include_bytes!("../../assets/images/add.svg"))
@@ -99,15 +145,17 @@ impl Render for Sidebar {
                             .pl(px(14.0))
                             .border_l(px(1.0))
                             .border_color(rgb(Theme::color(&theme.border)))
-                            .child(
-                                div()
-                                    .id("mail-account-0")
+                            .children(google_accounts.iter().enumerate().map(
+                                |(index, account)| {
+                                    let app_state = self.state.clone();
+                                    div()
+                                    .id(format!("google-account-{index}"))
                                     .px(px(8.0))
                                     .py(px(6.0))
                                     .text_size(px(12.0))
                                     .text_color(rgb(Theme::color(&theme.text_muted)))
                                     .when(
-                                        selected_sidebar_email == Some(SidebarEmail::Mail(0)),
+                                        selected_sidebar_email == Some(SidebarEmail::Google(index)),
                                         |row| {
                                             row.bg(rgb(Theme::color(&theme.selected_option)))
                                                 .text_color(rgb(Theme::color(&theme.text)))
@@ -120,47 +168,33 @@ impl Render for Sidebar {
                                     .cursor_pointer()
                                     .on_click(root_cx.listener(
                                         move |_this, _event, _window, cx| {
-                                            let app_state = mail_account_0_state.clone();
                                             app_state.update(cx, |state, cx| {
+                                                state.selected_email = None;
                                                 state.selected_sidebar_email =
-                                                    Some(SidebarEmail::Mail(0));
+                                                    Some(SidebarEmail::Google(index));
                                                 cx.notify();
                                             });
                                         },
                                     ))
-                                    .child("oliver@gmail.com"),
-                            )
-                            .child(
-                                div()
-                                    .id("mail-account-1")
-                                    .px(px(8.0))
-                                    .py(px(6.0))
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(Theme::color(&theme.text_muted)))
-                                    .when(
-                                        selected_sidebar_email == Some(SidebarEmail::Mail(1)),
-                                        |row| {
-                                            row.bg(rgb(Theme::color(&theme.selected_option)))
-                                                .text_color(rgb(Theme::color(&theme.text)))
-                                        },
-                                    )
-                                    .hover(|row| {
-                                        row.bg(rgb(Theme::color(&theme.selected_option)))
-                                            .text_color(rgb(Theme::color(&theme.text)))
+                                    .child(if account.email.is_empty() {
+                                        "Gmail".to_string()
+                                    } else {
+                                        account.email.clone()
                                     })
-                                    .cursor_pointer()
-                                    .on_click(root_cx.listener(
-                                        move |_this, _event, _window, cx| {
-                                            let app_state = mail_account_1_state.clone();
-                                            app_state.update(cx, |state, cx| {
-                                                state.selected_sidebar_email =
-                                                    Some(SidebarEmail::Mail(1));
-                                                cx.notify();
-                                            });
-                                        },
-                                    ))
-                                    .child("rem@googlemail.com"),
-                            ),
+                                },
+                            )),
+                    )
+                    .when_some(
+                        self.state.read(root_cx).google_login_status.clone(),
+                        |this, status| {
+                            this.child(
+                                div()
+                                    .px(px(8.0))
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(Theme::color(&theme.text_muted)))
+                                    .child(status),
+                            )
+                        },
                     ),
             )
             .child(
@@ -192,7 +226,7 @@ impl Render for Sidebar {
                                     .cursor_pointer()
                                     .on_click(root_cx.listener(
                                         move |_this, _event, _window, cx| {
-                                            let app_state = app_state.clone();
+                                            let app_state = temp_email_state.clone();
 
                                             cx.spawn(async move |_this, cx2| {
                                                 match create_account().await {

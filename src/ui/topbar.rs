@@ -15,6 +15,7 @@ impl Render for TopBar {
         div()
             .w_full()
             .h(px(35.0))
+            .flex_shrink_0()
             .flex()
             .items_center()
             .bg(rgb(Theme::color(&theme.surface_hover)))

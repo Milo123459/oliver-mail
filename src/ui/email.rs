@@ -29,6 +29,7 @@ impl Render for EmailView {
         div()
             .w_full()
             .h_full()
+            .min_h(px(0.0))
             .px(px(24.0))
             .py(px(20.0))
             .flex()
@@ -65,7 +66,11 @@ impl Render for EmailView {
                     .mt(px(24.0))
                     .text_size(px(15.0))
                     .text_color(rgb(Theme::color(&theme.text_muted)))
-                    .child(email.intro),
+                    .child(if email.body.is_empty() {
+                        email.intro
+                    } else {
+                        email.body
+                    }),
             )
             .into_any_element()
     }
