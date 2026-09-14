@@ -6,7 +6,4 @@
 - Imcoming email notfication (Customizamble per emaill)
 - Add alerts
 - Add theme upload/download
-- Add config button for theme
-- Add clickable emails
-
-- Add another top bar for permantent buttons e.g settings, icon, update, close, minmize
+- Add update button when detected update
