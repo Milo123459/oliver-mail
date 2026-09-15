@@ -108,6 +108,7 @@ impl Render for Sidebar {
                                                     Ok(account) => {
                                                         google_state.update(cx2, |state, cx| {
                                                             state.google_accounts.push(account);
+                                                            state.persist();
                                                             state.google_login_status = None;
                                                             state.selected_sidebar_email =
                                                                 Some(SidebarEmail::Google(
@@ -233,6 +234,7 @@ impl Render for Sidebar {
                                                     Ok(email) => {
                                                         app_state.update(cx2, |state, cx| {
                                                             state.temp_email.push(email);
+                                                            state.persist();
                                                             cx.notify();
                                                         });
                                                     }

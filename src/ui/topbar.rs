@@ -1,4 +1,5 @@
 use crate::models::Theme;
+use crate::app::AppState;
 use gpui::{
     Bounds, Context, Entity, Window, WindowBounds, WindowControlArea, WindowHandle, WindowOptions,
     div, prelude::*, px, rgb, size, svg,
@@ -6,6 +7,7 @@ use gpui::{
 
 pub struct TopBar {
     pub theme: Entity<Theme>,
+    pub state: Entity<AppState>,
     pub settings_window: Option<WindowHandle<crate::ui::settings::Settings>>,
 }
 
@@ -68,6 +70,7 @@ impl Render for TopBar {
 
                                 let bounds = Bounds::centered(None, size(px(900.0), px(650.0)), cx);
                                 let theme_entity = topbar.theme.clone();
+                                let state_entity = topbar.state.clone();
 
                                 let settings_window = cx
                                     .open_window(
@@ -83,6 +86,7 @@ impl Render for TopBar {
                                             let selected_theme = theme_entity.read(cx).name.clone();
                                             cx.new(|_| crate::ui::settings::Settings {
                                                 theme: theme_entity,
+                                                state: state_entity,
                                                 selected_theme,
                                                 theme_dropdown_open: false,
                                             })

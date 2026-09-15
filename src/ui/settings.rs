@@ -1,9 +1,11 @@
 use gpui::{Context, Entity, Window, WindowControlArea, div, prelude::*, px, rgb, svg};
 
 use crate::models::Theme;
+use crate::app::AppState;
 
 pub struct Settings {
     pub theme: Entity<Theme>,
+    pub state: Entity<AppState>,
     pub selected_theme: String,
     pub theme_dropdown_open: bool,
 }
@@ -254,7 +256,43 @@ impl Render for Settings {
                                     .child(selected_label)
                                     .child("v"),
                             )
-                            .when(self.theme_dropdown_open, |this| this.child(theme_options)),
+                            .when(self.theme_dropdown_open, |this| this.child(theme_options))
+                            .child(
+                                div()
+                                    .mt(px(40.0))
+                                    .text_size(px(14.0))
+                                    .text_color(rgb(Theme::color(&theme.text)))
+                                    .child("Storage"),
+                            )
+                            .child(
+                                div()
+                                    .id("delete-all-button")
+                                    .mt(px(10.0))
+                                    .w(px(280.0))
+                                    .px(px(12.0))
+                                    .py(px(10.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(rgb(0x8f2d24))
+                                    .text_color(rgb(0xffffff))
+                                    .cursor_pointer()
+                                    .hover(|this| this.bg(rgb(0xb83a2d)))
+                                    .on_click(cx.listener(|settings, _, _, cx| {
+                                        settings.state.update(cx, |state, cx| {
+                                            state.temp_email.clear();
+                                            state.google_accounts.clear();
+                                            state.email_cache.clear();
+                                            state.selected_email = None;
+                                            state.selected_message = None;
+                                            state.selected_sidebar_email = None;
+                                            state.google_login_status = None;
+                                            crate::storage::clear();
+                                            cx.notify();
+                                        });
+                                    }))
+                                    .child("Delete all saved mail and accounts"),
+                            ),
                     ),
             )
     }

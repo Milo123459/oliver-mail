@@ -1,9 +1,9 @@
 use rand::{Rng, distr::Alphanumeric};
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Email {
     pub id: String,
     pub from: String,
@@ -41,7 +41,7 @@ struct TokenResponse {
     token: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TempEmail {
     pub address: String,
     pub password: String,
@@ -149,6 +149,10 @@ async fn get_token(
     let token: TokenResponse = response.json().await?;
 
     Ok(token.token)
+}
+
+pub async fn refresh_token(email: &TempEmail) -> Result<String, Box<dyn std::error::Error>> {
+    get_token(&Client::new(), email).await
 }
 
 pub async fn get_mail(email: &TempEmail) -> Result<Vec<Email>, Box<dyn std::error::Error>> {

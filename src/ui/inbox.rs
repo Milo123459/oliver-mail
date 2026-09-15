@@ -1,5 +1,5 @@
 use crate::app::AppState;
-use crate::models::{Email, GoogleAccount, Theme, get_gmail_mail, get_gmail_message, get_mail};
+use crate::models::{Email, GoogleAccount, Theme, get_gmail_mail, get_gmail_message, get_mail, refresh_token};
 use crate::ui::EmailView;
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use futures_util::StreamExt;
@@ -30,7 +30,7 @@ impl Inbox {
         theme: Entity<Theme>,
         cx: &mut Context<Self>,
     ) -> Inbox {
-        let inbox = Self {
+        let mut inbox = Self {
             emails: Vec::new(),
             loading: false,
             state: state.clone(),
@@ -55,7 +55,7 @@ impl Inbox {
                         .google_accounts
                         .get(index)
                         .cloned()
-                        .map(|account| (format!("google:{index}"), Account::Google(index, account))),
+                        .map(|account| (format!("google:{}", account.email), Account::Google(index, account))),
                     _ => None,
                 }
             };
@@ -88,6 +88,28 @@ impl Inbox {
         })
         .detach();
 
+        let selected_account = {
+            let state = state.read(cx);
+            match state.selected_sidebar_email {
+                Some(crate::app::SidebarEmail::Temp(index)) => state
+                    .temp_email
+                    .get(index)
+                    .cloned()
+                    .map(Account::Temp),
+                Some(crate::app::SidebarEmail::Google(index)) => state
+                    .google_accounts
+                    .get(index)
+                    .cloned()
+                    .map(|account| Account::Google(index, account)),
+                _ => None,
+            }
+        };
+        match selected_account {
+            Some(Account::Temp(account)) => inbox.start_mail_listener(account, cx),
+            Some(Account::Google(index, account)) => inbox.start_google_listener(index, account, cx),
+            None => {}
+        }
+
         inbox
     }
 
@@ -101,9 +123,15 @@ impl Inbox {
             let _ = cancel_sender.send(());
         }
         self.mail_task = None;
-        let account_key = format!("google:{account_index}");
+        let account_key = format!("google:{}", account.email);
         self.active_account_id = Some(account_key.clone());
-        self.emails.clear();
+        self.emails = self
+            .state
+            .read(cx)
+            .email_cache
+            .get(&account_key)
+            .cloned()
+            .unwrap_or_default();
         self.email_view.update(cx, |email_view, _cx| {
             email_view.email = None;
         });
@@ -119,6 +147,7 @@ impl Inbox {
                 Ok(emails) => {
                     state.update(cx, |state, cx| {
                         state.google_accounts[account_index] = account.clone();
+                        state.persist();
                         cx.notify();
                     });
                     this.update(cx, |inbox, cx| {
@@ -126,6 +155,7 @@ impl Inbox {
                             return;
                         }
                         inbox.merge_emails(emails);
+                        inbox.persist_emails(cx);
                         inbox.loading = false;
                         cx.notify();
                     })?;
@@ -148,14 +178,20 @@ impl Inbox {
         self.mail_task = Some(task);
     }
 
-    fn start_mail_listener(&mut self, account: crate::models::TempEmail, cx: &mut Context<Self>) {
+    fn start_mail_listener(&mut self, mut account: crate::models::TempEmail, cx: &mut Context<Self>) {
         if let Some(cancel_sender) = self.cancel_sender.take() {
             let _ = cancel_sender.send(());
         }
         self.mail_task = None;
         let account_key = format!("temp:{}", account.id);
         self.active_account_id = Some(account_key.clone());
-        self.emails.clear();
+        self.emails = self
+            .state
+            .read(cx)
+            .email_cache
+            .get(&account_key)
+            .cloned()
+            .unwrap_or_default();
         self.email_view.update(cx, |email_view, _cx| {
             email_view.email = None;
         });
@@ -167,7 +203,22 @@ impl Inbox {
 
         let (cancel_sender, mut cancel_receiver) = oneshot::channel();
         self.cancel_sender = Some(cancel_sender);
+        let state = self.state.clone();
         let task = cx.spawn(async move |this, cx| {
+            if let Ok(token) = refresh_token(&account).await {
+                account.token = token;
+                state.update(cx, |state, _cx| {
+                    if let Some(saved_account) = state
+                        .temp_email
+                        .iter_mut()
+                        .find(|saved_account| saved_account.id == account.id)
+                    {
+                        saved_account.token = account.token.clone();
+                    }
+                    state.persist();
+                });
+            }
+
             match get_mail(&account).await {
                 Ok(emails) => {
                     this.update(cx, |inbox, cx| {
@@ -175,6 +226,7 @@ impl Inbox {
                             return;
                         }
                         inbox.merge_emails(emails);
+                        inbox.persist_emails(cx);
                         inbox.loading = false;
                         cx.notify();
                     })?;
@@ -228,6 +280,7 @@ impl Inbox {
                                     return;
                                 }
                                 inbox.merge_emails(emails);
+                                inbox.persist_emails(cx);
                                 cx.notify();
                             })?;
                         }
@@ -250,7 +303,9 @@ impl Inbox {
                 .iter_mut()
                 .find(|existing| existing.id == email.id)
             {
-                *existing = email;
+                if existing.body.is_empty() || !email.body.is_empty() {
+                    *existing = email;
+                }
             } else {
                 self.emails.push(email);
             }
@@ -258,6 +313,17 @@ impl Inbox {
 
         self.emails
             .sort_by(|left, right| right.created_at.cmp(&left.created_at));
+
+    }
+
+    fn persist_emails(&self, cx: &mut Context<Self>) {
+        if let Some(account_key) = self.active_account_id.clone() {
+            let emails = self.emails.clone();
+            self.state.update(cx, |state, _cx| {
+                state.email_cache.insert(account_key, emails);
+                state.persist();
+            });
+        }
     }
 }
 
@@ -404,6 +470,23 @@ impl Render for Inbox {
                                                         Ok(full_email) => {
                                                             state_for_task.update(cx2, |state, cx| {
                                                                 state.google_accounts[google_index] = account;
+                                                                let account_key = format!(
+                                                                    "google:{}",
+                                                                    state.google_accounts[google_index].email
+                                                                );
+                                                                let cached_emails = state
+                                                                    .email_cache
+                                                                    .entry(account_key)
+                                                                    .or_default();
+                                                                if let Some(cached_email) = cached_emails
+                                                                    .iter_mut()
+                                                                    .find(|cached_email| cached_email.id == full_email.id)
+                                                                {
+                                                                    *cached_email = full_email.clone();
+                                                                } else {
+                                                                    cached_emails.push(full_email.clone());
+                                                                }
+                                                                state.persist();
                                                                 state.selected_message = Some(full_email.clone());
                                                                 cx.notify();
                                                             });

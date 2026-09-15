@@ -13,7 +13,7 @@ use rand::{
     distr::Alphanumeric,
     Rng,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{
     Digest,
     Sha256,
@@ -46,7 +46,7 @@ pub struct GoogleTokenResponse {
     pub token_type: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct GoogleAccount {
     pub email: String,
     pub access_token: String,

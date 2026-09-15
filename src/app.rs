@@ -1,6 +1,7 @@
 use gpui::{
     App, Context, Entity, TitlebarOptions, Window, WindowOptions, div, prelude::*, px, rgb, size,
 };
+use std::collections::HashMap;
 
 use crate::models::{Email, GoogleAccount, TempEmail, Theme};
 use crate::ui::{EmailView, Inbox, MailTopBar, Sidebar, TopBar};
@@ -19,10 +20,44 @@ pub struct MailApp {
 pub struct AppState {
     pub temp_email: Vec<TempEmail>,
     pub google_accounts: Vec<GoogleAccount>,
+    pub email_cache: HashMap<String, Vec<Email>>,
     pub selected_email: Option<usize>,
     pub selected_message: Option<Email>,
     pub selected_sidebar_email: Option<SidebarEmail>,
     pub google_login_status: Option<String>,
+}
+
+impl AppState {
+    fn from_storage(data: crate::storage::StoredData) -> Self {
+        let selected_sidebar_email = if !data.google_accounts.is_empty() {
+            Some(SidebarEmail::Google(0))
+        } else if !data.temp_email.is_empty() {
+            Some(SidebarEmail::Temp(0))
+        } else {
+            None
+        };
+
+        Self {
+            temp_email: data.temp_email,
+            google_accounts: data.google_accounts,
+            email_cache: data.emails,
+            selected_email: match selected_sidebar_email {
+                Some(SidebarEmail::Temp(index)) => Some(index),
+                _ => None,
+            },
+            selected_message: None,
+            selected_sidebar_email,
+            google_login_status: None,
+        }
+    }
+
+    pub fn persist(&self) {
+        crate::storage::save(&crate::storage::StoredData {
+            temp_email: self.temp_email.clone(),
+            google_accounts: self.google_accounts.clone(),
+            emails: self.email_cache.clone(),
+        });
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,20 +93,14 @@ impl MailApp {
             },
             |_, cx| {
                 let theme = cx.new(|_| Theme::load());
-                let state = cx.new(|_| AppState {
-                    temp_email: Vec::new(),
-                    google_accounts: Vec::new(),
-                    selected_email: None,
-                    selected_message: None,
-                    selected_sidebar_email: None,
-                    google_login_status: None,
-                });
+                let state = cx.new(|_| AppState::from_storage(crate::storage::load()));
                 let sidebar = cx.new(|_| Sidebar {
                     state: state.clone(),
                     theme: theme.clone(),
                 });
                 let topbar = cx.new(|_| TopBar {
                     theme: theme.clone(),
+                    state: state.clone(),
                     settings_window: None,
                 });
                 let mailtopbar = cx.new(|_| MailTopBar {

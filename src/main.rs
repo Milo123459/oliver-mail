@@ -1,6 +1,7 @@
 mod app;
 mod assets;
 mod models;
+mod storage;
 mod ui;
 
 use app::MailApp;
