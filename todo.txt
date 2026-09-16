@@ -7,3 +7,4 @@
 - Add alerts
 - Add theme upload/download
 - Add update button when detected update
+- Add a config button next to each email to have options e.g delete, rename
