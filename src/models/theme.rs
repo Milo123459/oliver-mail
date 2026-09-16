@@ -1,5 +1,5 @@
+use crate::assets::Assets;
 use serde::Deserialize;
-use std::{fs, path::PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct Theme {
@@ -55,15 +55,12 @@ impl Theme {
     }
 
     pub fn load_named(name: &str) -> Self {
-        let path = Self::available()
+        let asset_path = Self::available()
             .into_iter()
             .find(|theme| theme.id == name)
-            .map(|theme| Self::theme_directory().join(format!("{}.json", theme.id)))
+            .map(|theme| format!("themes/{}.json", theme.id))
             .unwrap_or_else(|| panic!("Unknown theme: {name}"));
-        let contents = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("Failed to read theme {}: {error}", path.display()));
-        let file: ThemeFile = serde_json::from_str(&contents)
-            .unwrap_or_else(|error| panic!("Failed to parse theme {}: {error}", path.display()));
+        let file = Self::read_asset(&asset_path);
         let colors = file
             .style
             .into_iter()
@@ -86,34 +83,18 @@ impl Theme {
     }
 
     pub fn available() -> Vec<ThemeInfo> {
-        let directory = Self::theme_directory();
-        let entries = fs::read_dir(&directory)
-            .unwrap_or_else(|error| panic!("Failed to read {}: {error}", directory.display()));
-
-        let mut themes = entries
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .path()
-                    .extension()
-                    .is_some_and(|extension| extension == "json")
-            })
-            .filter_map(|entry| {
-                let path = entry.path();
-                let id = path.file_stem()?.to_str()?.to_string();
-                let contents = fs::read_to_string(&path).ok()?;
-                let file: ThemeFile = serde_json::from_str(&contents).ok()?;
+        let mut themes = Assets::iter()
+            .filter_map(|path| path.strip_prefix("themes/").map(str::to_owned))
+            .filter(|path| path.ends_with(".json"))
+            .filter_map(|path| {
+                let id = path.strip_suffix(".json")?.to_string();
+                let file = Self::read_asset(&format!("themes/{id}.json"));
                 if file.style.is_empty() {
                     return None;
                 }
-                let fallback_name = path.file_stem()?.to_str()?.to_string();
                 Some(ThemeInfo {
-                    id,
-                    name: if file.name.is_empty() {
-                        fallback_name
-                    } else {
-                        file.name
-                    },
+                    id: id.clone(),
+                    name: if file.name.is_empty() { id } else { file.name },
                 })
             })
             .collect::<Vec<_>>();
@@ -131,13 +112,10 @@ impl Theme {
             .map(|theme| theme.id.clone())
     }
 
-    fn theme_directory() -> PathBuf {
-        let working_directory = PathBuf::from("assets/themes");
-        if working_directory.is_dir() {
-            working_directory
-        } else {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/themes")
-        }
+    fn read_asset(path: &str) -> ThemeFile {
+        let asset = Assets::get(path).unwrap_or_else(|| panic!("Theme asset not found: {path}"));
+        serde_json::from_slice(&asset.data)
+            .unwrap_or_else(|error| panic!("Failed to parse theme {path}: {error}"))
     }
 
     pub fn color(value: &str) -> u32 {
