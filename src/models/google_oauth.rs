@@ -1,3 +1,9 @@
+//! Gmail support: signing in with Google (OAuth) and reading messages through
+//! the Gmail REST API.
+//!
+//! All the functions here are `async` and do network calls, so they are run
+//! on the tokio runtime (via `crate::runtime::spawn`), never directly on the
+//! UI thread.
 use anyhow::{Context, Result};
 use axum::{Router, extract::Query, response::Html, routing::get};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -15,6 +21,8 @@ const REDIRECT_URI: &str = "http://127.0.0.1:49152/callback";
 
 const SCOPE: &str = "https://www.googleapis.com/auth/gmail.readonly";
 
+// A small server that holds the Google client secret (which must not be
+// shipped inside the app) and does the token exchange/refresh for us.
 const OAUTH_SERVER: &str = "https://mail-server-production-610b.up.railway.app";
 
 #[derive(Debug, Deserialize)]
@@ -88,6 +96,10 @@ impl GoogleAccount {
         Ok(())
     }
 
+    // Google access tokens expire after about an hour. This returns the current
+    // one, or uses the refresh token to get a new one first if it's about to
+    // expire. That's why callers pass `&mut GoogleAccount` and save the account
+    // back into `AppState` afterwards.
     pub async fn ensure_access_token(&mut self) -> Result<&str> {
         if now_unix_seconds() + 60 < self.expires_at {
             return Ok(&self.access_token);
@@ -129,6 +141,15 @@ fn now_unix_seconds() -> u64 {
         .map_or(0, |duration| duration.as_secs())
 }
 
+// Google sign-in flow:
+// 1. Start a tiny local web server on 127.0.0.1:49152 (axum).
+// 2. Open the Google login page in the user's browser.
+// 3. After they approve, Google redirects the browser to our local server
+//    with a one-time `code`.
+// 4. Swap that code for access + refresh tokens (via OAUTH_SERVER).
+// 5. Ask Gmail for the account's email address.
+// The local server uses `tokio::spawn`, which only works inside a tokio
+// runtime; that's one reason login must be started with `runtime::spawn`.
 pub async fn login() -> Result<GoogleAccount> {
     let code_verifier = generate_code_verifier();
     let code_challenge = generate_code_challenge(&code_verifier);
@@ -267,6 +288,10 @@ pub async fn login() -> Result<GoogleAccount> {
     Ok(account)
 }
 
+// PKCE: a random secret we keep, plus its SHA-256 hash (the "challenge")
+// that we send to Google. When exchanging the code we prove we started the
+// login by sending the original secret. Stops someone who intercepts the
+// code from using it.
 fn generate_code_verifier() -> String {
     rand::rng()
         .sample_iter(&Alphanumeric)
@@ -352,6 +377,9 @@ struct GmailBody {
     data: Option<String>,
 }
 
+// Loads the newest inbox messages (headers + preview only, no bodies).
+// Gmail's list endpoint only returns ids, so each message's details need a
+// second request.
 pub async fn get_gmail_mail(
     account: &mut GoogleAccount,
     limit: usize,
@@ -422,6 +450,8 @@ pub async fn get_gmail_mail(
                     .map(|message| to_email(message, false))
             }
         })
+        // Run up to 6 of those requests at the same time (keeping the results
+        // in order) instead of one after another, so the inbox loads faster.
         .buffered(6)
         .filter_map(|email| async move { email })
         .collect::<Vec<_>>()
@@ -510,6 +540,9 @@ fn extract_body(payload: &GmailPayload) -> String {
         .unwrap_or_default()
 }
 
+// Emails are a tree of "parts" (e.g. multipart/alternative containing a
+// text/plain part and a text/html part). This searches the tree for the
+// first part of the wanted type that actually has content.
 fn find_part(payload: &GmailPayload, mime: Option<&str>) -> Option<String> {
     let mime_matches = match (mime, payload.mime_type.as_deref()) {
         (None, _) => true,
