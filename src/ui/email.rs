@@ -1,6 +1,6 @@
 use crate::app::AppState;
 use crate::models::{Email, Theme};
-use gpui::{Context, Entity, Render, Window, div, prelude::*, px, rgb};
+use gpui::{Context, Entity, Overflow, Render, Window, div, prelude::*, px, rgb};
 
 pub struct EmailView {
     pub state: Entity<AppState>,
@@ -64,13 +64,20 @@ impl Render for EmailView {
             .child(
                 div()
                     .mt(px(24.0))
-                    .text_size(px(15.0))
-                    .text_color(rgb(Theme::color(&theme.text_muted)))
-                    .child(if email.body.is_empty() {
-                        email.intro
-                    } else {
-                        email.body
-                    }),
+                    .flex_1()
+                    .min_h(px(0.0))
+                    //.overflow_y_scroll()
+                    .pr(px(12.0))
+                    .child(
+                        div()
+                            .text_size(px(15.0))
+                            .text_color(rgb(Theme::color(&theme.text_muted)))
+                            .child(if email.body.is_empty() {
+                                email.intro
+                            } else {
+                                email.body
+                            }),
+                    ),
             )
             .into_any_element()
     }

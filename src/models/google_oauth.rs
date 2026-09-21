@@ -32,7 +32,7 @@ const SCOPE: &str =
     "https://www.googleapis.com/auth/gmail.readonly";
 
 const OAUTH_SERVER: &str =
-    "https://mail-server-9ygn.onrender.com";
+    "https://mail-server-production-610b.up.railway.app";
 
 #[derive(Debug, Deserialize)]
 struct CallbackQuery {
@@ -400,10 +400,9 @@ struct GmailBody {
     data: Option<String>,
 }
 
-pub async fn get_gmail_mail(
-    account: &mut GoogleAccount,
-    limit: usize,
-) -> Result<Vec<super::temp_mail::Email>> {
+pub async fn get_gmail_mail(account: &mut GoogleAccount,limit: usize) -> Result<Vec<super::temp_mail::Email>> {
+    eprintln!("GMAIL LISTENER: START {}", account_key);
+
     let access_token = account.ensure_access_token().await?.to_owned();
 
     let limit = limit.clamp(1, 25);
@@ -467,6 +466,7 @@ pub async fn get_gmail_mail(
             emails.push(to_email(message, false));
         }
     }
+    eprintln!("GMAIL LISTENER: FINISHED {}", account_key);
 
     Ok(emails)
 }
@@ -475,18 +475,48 @@ pub async fn get_gmail_message(
     account: &mut GoogleAccount,
     message_id: &str,
 ) -> Result<super::temp_mail::Email> {
-    let access_token = account.ensure_access_token().await?.to_owned();
+    eprintln!("GET MESSAGE: starting ensure_access_token");
 
-    let response = reqwest::Client::new()
-        .get(format!(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
-            message_id
-        ))
-        .bearer_auth(access_token)
-        .query(&[("format", "full")])
-        .send()
-        .await
-        .context("Failed to load Gmail message")?;
+    let access_token = account
+        .ensure_access_token()
+        .await?
+        .to_owned();
+
+    eprintln!("GET MESSAGE: access token ready");
+
+    let url = format!(
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
+        message_id
+    );
+
+    eprintln!("GET MESSAGE: requesting {}", message_id);
+
+    let client = reqwest::Client::builder()
+        .http1_only()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(20))
+        .pool_max_idle_per_host(0)
+        .build()
+        .context("Failed to create Gmail message client")?;
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(10),
+        client
+            .get(&url)
+            .header("Connection", "close")
+            .bearer_auth(&access_token)
+            .query(&[("format", "full")])
+            .send(),
+    )
+    .await
+    .context("Gmail request timed out after 10 seconds")?
+    .context("Failed to load Gmail message")?;
+
+
+    eprintln!(
+        "GET MESSAGE: HTTP response received: {}",
+        response.status()
+    );
 
     if !response.status().is_success() {
         let status = response.status();
@@ -499,14 +529,18 @@ pub async fn get_gmail_message(
         );
     }
 
-    Ok(to_email(
-        response
-            .json::<GmailMessage>()
-            .await
-            .context("Failed to parse Gmail message")?,
-        true,
-    ))
+    eprintln!("GET MESSAGE: parsing response");
+
+    let message = response
+        .json::<GmailMessage>()
+        .await
+        .context("Failed to parse Gmail message")?;
+
+    eprintln!("GET MESSAGE: response parsed");
+
+    Ok(to_email(message, true))
 }
+
 
 fn to_email(
     message: GmailMessage,

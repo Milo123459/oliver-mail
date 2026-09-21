@@ -113,18 +113,17 @@ impl Inbox {
         inbox
     }
 
-    fn start_google_listener(
-        &mut self,
-        account_index: usize,
-        mut account: GoogleAccount,
-        cx: &mut Context<Self>,
-    ) {
+    fn start_google_listener(&mut self, account_index: usize, mut account: GoogleAccount, cx: &mut Context<Self>) {
         if let Some(cancel_sender) = self.cancel_sender.take() {
             let _ = cancel_sender.send(());
         }
+
         self.mail_task = None;
+
         let account_key = format!("google:{}", account.email);
+
         self.active_account_id = Some(account_key.clone());
+
         self.emails = self
             .state
             .read(cx)
@@ -132,40 +131,91 @@ impl Inbox {
             .get(&account_key)
             .cloned()
             .unwrap_or_default();
+
         self.email_view.update(cx, |email_view, _cx| {
             email_view.email = None;
         });
+
         self.state.update(cx, |state, _cx| {
             state.selected_message = None;
         });
+
         self.loading = true;
         cx.notify();
 
+        let (cancel_sender, mut cancel_receiver) = oneshot::channel();
+        self.cancel_sender = Some(cancel_sender);
+
         let state = self.state.clone();
+
         let task = cx.spawn(async move |this, cx| {
-            match get_gmail_mail(&mut account, 25).await {
+            let result = tokio::select! {
+                _ = &mut cancel_receiver => {
+                    eprintln!(
+                        "GMAIL LISTENER: cancelled {}",
+                        account_key
+                    );
+
+                    return Ok::<(), anyhow::Error>(());
+                }
+
+                result = get_gmail_mail(&mut account, 25) => {
+                    result
+                }
+            };
+
+            match result {
                 Ok(emails) => {
+                    eprintln!(
+                        "GMAIL LISTENER: loaded {} emails for {}",
+                        emails.len(),
+                        account_key
+                    );
+
+                    /*
+                    * IMPORTANT:
+                    *
+                    * Do not persist here.
+                    *
+                    * state.persist() performs synchronous serialization/file I/O
+                    * and can block the GPUI application while switching accounts.
+                    */
                     state.update(cx, |state, cx| {
                         state.google_accounts[account_index] = account.clone();
-                        state.persist();
                         cx.notify();
                     });
+
                     this.update(cx, |inbox, cx| {
-                        if inbox.active_account_id.as_deref() != Some(account_key.as_str()) {
+                        if inbox.active_account_id.as_deref()
+                            != Some(account_key.as_str())
+                        {
                             return;
                         }
+
                         inbox.merge_emails(emails);
-                        inbox.persist_emails(cx);
+
+                        /*
+                        * Do not persist the complete email cache here either.
+                        *
+                        * We want to determine whether synchronous persistence
+                        * is responsible for the freeze.
+                        */
+
                         inbox.loading = false;
                         cx.notify();
                     })?;
                 }
+
                 Err(error) => {
                     eprintln!("Failed to retrieve Gmail: {error:#}");
+
                     this.update(cx, |inbox, cx| {
-                        if inbox.active_account_id.as_deref() != Some(account_key.as_str()) {
+                        if inbox.active_account_id.as_deref()
+                            != Some(account_key.as_str())
+                        {
                             return;
                         }
+
                         inbox.loading = false;
                         cx.notify();
                     })?;
@@ -460,44 +510,45 @@ impl Render for Inbox {
                                             };
 
                                             if let Some(google_index) = google_index {
+                                                dbg!("LOCKED state received");
                                                 let account = state.read(cx).google_accounts[google_index].clone();
                                                 let state_for_task = state.clone();
                                                 let email_view_for_task = email_view.clone();
                                                 let message_id = email.id.clone();
                                                 cx.spawn(async move |cx2| {
                                                     let mut account = account;
+
+                                                    eprintln!("OPENING GMAIL MESSAGE: {}", message_id);
+
                                                     match get_gmail_message(&mut account, &message_id).await {
                                                         Ok(full_email) => {
+                                                            eprintln!(
+                                                                "GMAIL MESSAGE LOADED: id={}, body_chars={}, subject_chars={}",
+                                                                full_email.id,
+                                                                full_email.body.chars().count(),
+                                                                full_email.subject.chars().count()
+                                                            );
+
                                                             state_for_task.update(cx2, |state, cx| {
                                                                 state.google_accounts[google_index] = account;
-                                                                let account_key = format!(
-                                                                    "google:{}",
-                                                                    state.google_accounts[google_index].email
-                                                                );
-                                                                let cached_emails = state
-                                                                    .email_cache
-                                                                    .entry(account_key)
-                                                                    .or_default();
-                                                                if let Some(cached_email) = cached_emails
-                                                                    .iter_mut()
-                                                                    .find(|cached_email| cached_email.id == full_email.id)
-                                                                {
-                                                                    *cached_email = full_email.clone();
-                                                                } else {
-                                                                    cached_emails.push(full_email.clone());
-                                                                }
-                                                                state.persist();
                                                                 state.selected_message = Some(full_email.clone());
                                                                 cx.notify();
                                                             });
+
+                                                            eprintln!("UPDATING EMAIL VIEW");
+
                                                             email_view_for_task.update(cx2, |email_view, _cx| {
                                                                 email_view.email = Some(full_email);
                                                             });
+
+                                                            eprintln!("EMAIL VIEW UPDATED");
+
                                                         }
                                                         Err(error) => eprintln!("Failed to load Gmail message: {error:#}"),
                                                     }
                                                     Ok::<(), anyhow::Error>(())
                                                 }).detach();
+                                                dbg!("DETATCHED AND STATE IS NO LONGER LOCKED ( ITHINK )");
                                             } else {
                                                 email_view.update(cx, |email_view, _cx| {
                                                     email_view.email = Some(email.clone());
