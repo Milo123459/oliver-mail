@@ -1,0 +1,24 @@
+{
+  "temp_email": [
+    {
+      "address": "rzcud5bgozze@uberip.com",
+      "password": "KtvdiKDEMi7riD9T3drG",
+      "id": "6ab0fc7a827e5a93ed011827",
+      "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpYXQiOjE3ODk5ODM4NjksInJvbGVzIjpbIlJPTEVfVVNFUiJdLCJhZGRyZXNzIjoicnpjdWQ1YmdvenplQHViZXJpcC5jb20iLCJpZCI6IjZhYjBmYzdhODI3ZTVhOTNlZDAxMTgyNyIsIm1lcmN1cmUiOnsic3Vic2NyaWJlIjpbIi9hY2NvdW50cy82YWIwZmM3YTgyN2U1YTkzZWQwMTE4MjciXX19.vSQyCdGfaIojlSf74_Jg76fuubQ3BEFejohvHpWzhI23jxgsLse1XY6uS3RGbmQ7KXmlxOaFNN0z-Zypz-tF_Q"
+    }
+  ],
+  "google_accounts": [],
+  "emails": {
+    "temp:6ab0fc7a827e5a93ed011827": [
+      {
+        "id": "6ab0fc9fb282321b1b3fe62f",
+        "from": "milo5huntington@gmail.com",
+        "subject": "",
+        "intro": "jqowkejqwoievjwqoievjwqiovjqe ioqjeoiwqjeoiqwjeoiqwcjeoiwvjoqejqwve Qoiejwqoejqwcioe",
+        "body": "",
+        "seen": false,
+        "created_at": "2026-09-21T09:44:50+00:00"
+      }
+    ]
+  }
+}

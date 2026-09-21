@@ -1,5 +1,5 @@
-use crate::models::Theme;
 use crate::app::AppState;
+use crate::models::Theme;
 use gpui::{
     Bounds, Context, Entity, Window, WindowBounds, WindowControlArea, WindowHandle, WindowOptions,
     div, prelude::*, px, rgb, size, svg,

@@ -93,10 +93,7 @@ impl Render for Sidebar {
                                     .on_click(root_cx.listener(
                                         move |_this, _event, _window, cx| {
                                             let google_state = google_state.clone();
-                                            if google_state
-                                                .read(cx)
-                                                .google_login_status
-                                                .as_deref()
+                                            if google_state.read(cx).google_login_status.as_deref()
                                                 == Some("Opening Google login...")
                                             {
                                                 return;
@@ -123,7 +120,9 @@ impl Render for Sidebar {
                                                     Err(error) => {
                                                         google_state.update(cx2, |state, cx| {
                                                             state.google_login_status =
-                                                                Some(format!("Google login failed: {error:#}"));
+                                                                Some(format!(
+                                                                    "Google login failed: {error:#}"
+                                                                ));
                                                             cx.notify();
                                                         });
                                                         eprintln!("Google login failed: {error:#}");
@@ -156,41 +155,43 @@ impl Render for Sidebar {
                                     let is_selected =
                                         selected_sidebar_email == Some(SidebarEmail::Google(index));
                                     div()
-                                    .id(format!("google-account-{index}"))
-                                    .px(px(8.0))
-                                    .py(px(6.0))
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(Theme::color(&theme.text_muted)))
-                                    .hover(|row| {
-                                        row.bg(rgb(Theme::color(&theme.selected_option)))
-                                            .text_color(rgb(Theme::color(&theme.text_muted)))
-                                    })
-                                    .when(is_selected, |row| {
-                                        row.bg(rgb(Theme::color(&theme.selected_option)))
-                                            .text_color(rgb(Theme::color(&theme.text)))
-                                    })
-                                    .cursor_pointer()
-                                    .on_click(root_cx.listener(
-                                        move |_this, _event, _window, cx| {
-                                            if is_selected && !email_address.is_empty() {
-                                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                                    email_address.clone(),
-                                                ));
-                                                return;
-                                            }
-                                            app_state.update(cx, |state, cx| {
-                                                state.selected_email = None;
-                                                state.selected_sidebar_email =
-                                                    Some(SidebarEmail::Google(index));
-                                                cx.notify();
-                                            });
-                                        },
-                                    ))
-                                    .child(if account.email.is_empty() {
-                                        "Gmail".to_string()
-                                    } else {
-                                        account.email.clone()
-                                    })
+                                        .id(format!("google-account-{index}"))
+                                        .px(px(8.0))
+                                        .py(px(6.0))
+                                        .text_size(px(12.0))
+                                        .text_color(rgb(Theme::color(&theme.text_muted)))
+                                        .hover(|row| {
+                                            row.bg(rgb(Theme::color(&theme.selected_option)))
+                                                .text_color(rgb(Theme::color(&theme.text_muted)))
+                                        })
+                                        .when(is_selected, |row| {
+                                            row.bg(rgb(Theme::color(&theme.selected_option)))
+                                                .text_color(rgb(Theme::color(&theme.text)))
+                                        })
+                                        .cursor_pointer()
+                                        .on_click(root_cx.listener(
+                                            move |_this, _event, _window, cx| {
+                                                if is_selected && !email_address.is_empty() {
+                                                    cx.write_to_clipboard(
+                                                        ClipboardItem::new_string(
+                                                            email_address.clone(),
+                                                        ),
+                                                    );
+                                                    return;
+                                                }
+                                                app_state.update(cx, |state, cx| {
+                                                    state.selected_email = None;
+                                                    state.selected_sidebar_email =
+                                                        Some(SidebarEmail::Google(index));
+                                                    cx.notify();
+                                                });
+                                            },
+                                        ))
+                                        .child(if account.email.is_empty() {
+                                            "Gmail".to_string()
+                                        } else {
+                                            account.email.clone()
+                                        })
                                 },
                             )),
                     )

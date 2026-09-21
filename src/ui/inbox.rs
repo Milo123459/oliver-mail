@@ -1,5 +1,7 @@
 use crate::app::AppState;
-use crate::models::{Email, GoogleAccount, Theme, get_gmail_mail, get_gmail_message, get_mail, refresh_token};
+use crate::models::{
+    Email, GoogleAccount, Theme, get_gmail_mail, get_gmail_message, get_mail, refresh_token,
+};
 use crate::ui::EmailView;
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use futures_util::StreamExt;
@@ -51,11 +53,14 @@ impl Inbox {
                         .get(index)
                         .cloned()
                         .map(|account| (format!("temp:{}", account.id), Account::Temp(account))),
-                    Some(crate::app::SidebarEmail::Google(index)) => state
-                        .google_accounts
-                        .get(index)
-                        .cloned()
-                        .map(|account| (format!("google:{}", account.email), Account::Google(index, account))),
+                    Some(crate::app::SidebarEmail::Google(index)) => {
+                        state.google_accounts.get(index).cloned().map(|account| {
+                            (
+                                format!("google:{}", account.email),
+                                Account::Google(index, account),
+                            )
+                        })
+                    }
                     _ => None,
                 }
             };
@@ -91,11 +96,9 @@ impl Inbox {
         let selected_account = {
             let state = state.read(cx);
             match state.selected_sidebar_email {
-                Some(crate::app::SidebarEmail::Temp(index)) => state
-                    .temp_email
-                    .get(index)
-                    .cloned()
-                    .map(Account::Temp),
+                Some(crate::app::SidebarEmail::Temp(index)) => {
+                    state.temp_email.get(index).cloned().map(Account::Temp)
+                }
                 Some(crate::app::SidebarEmail::Google(index)) => state
                     .google_accounts
                     .get(index)
@@ -106,14 +109,21 @@ impl Inbox {
         };
         match selected_account {
             Some(Account::Temp(account)) => inbox.start_mail_listener(account, cx),
-            Some(Account::Google(index, account)) => inbox.start_google_listener(index, account, cx),
+            Some(Account::Google(index, account)) => {
+                inbox.start_google_listener(index, account, cx)
+            }
             None => {}
         }
 
         inbox
     }
 
-    fn start_google_listener(&mut self, account_index: usize, mut account: GoogleAccount, cx: &mut Context<Self>) {
+    fn start_google_listener(
+        &mut self,
+        account_index: usize,
+        mut account: GoogleAccount,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(cancel_sender) = self.cancel_sender.take() {
             let _ = cancel_sender.send(());
         }
@@ -173,33 +183,31 @@ impl Inbox {
                     );
 
                     /*
-                    * IMPORTANT:
-                    *
-                    * Do not persist here.
-                    *
-                    * state.persist() performs synchronous serialization/file I/O
-                    * and can block the GPUI application while switching accounts.
-                    */
+                     * IMPORTANT:
+                     *
+                     * Do not persist here.
+                     *
+                     * state.persist() performs synchronous serialization/file I/O
+                     * and can block the GPUI application while switching accounts.
+                     */
                     state.update(cx, |state, cx| {
                         state.google_accounts[account_index] = account.clone();
                         cx.notify();
                     });
 
                     this.update(cx, |inbox, cx| {
-                        if inbox.active_account_id.as_deref()
-                            != Some(account_key.as_str())
-                        {
+                        if inbox.active_account_id.as_deref() != Some(account_key.as_str()) {
                             return;
                         }
 
                         inbox.merge_emails(emails);
 
                         /*
-                        * Do not persist the complete email cache here either.
-                        *
-                        * We want to determine whether synchronous persistence
-                        * is responsible for the freeze.
-                        */
+                         * Do not persist the complete email cache here either.
+                         *
+                         * We want to determine whether synchronous persistence
+                         * is responsible for the freeze.
+                         */
 
                         inbox.loading = false;
                         cx.notify();
@@ -210,9 +218,7 @@ impl Inbox {
                     eprintln!("Failed to retrieve Gmail: {error:#}");
 
                     this.update(cx, |inbox, cx| {
-                        if inbox.active_account_id.as_deref()
-                            != Some(account_key.as_str())
-                        {
+                        if inbox.active_account_id.as_deref() != Some(account_key.as_str()) {
                             return;
                         }
 
@@ -228,7 +234,11 @@ impl Inbox {
         self.mail_task = Some(task);
     }
 
-    fn start_mail_listener(&mut self, mut account: crate::models::TempEmail, cx: &mut Context<Self>) {
+    fn start_mail_listener(
+        &mut self,
+        mut account: crate::models::TempEmail,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(cancel_sender) = self.cancel_sender.take() {
             let _ = cancel_sender.send(());
         }
@@ -324,8 +334,7 @@ impl Inbox {
                     Ok(Event::Message(_)) => match get_mail(&account).await {
                         Ok(emails) => {
                             this.update(cx, |inbox, cx| {
-                                if inbox.active_account_id.as_deref()
-                                    != Some(account_key.as_str())
+                                if inbox.active_account_id.as_deref() != Some(account_key.as_str())
                                 {
                                     return;
                                 }
@@ -363,7 +372,6 @@ impl Inbox {
 
         self.emails
             .sort_by(|left, right| right.created_at.cmp(&left.created_at));
-
     }
 
     fn persist_emails(&self, cx: &mut Context<Self>) {
@@ -406,8 +414,14 @@ fn email_date(value: &str) -> String {
     let date = value
         .parse::<i64>()
         .ok()
-        .and_then(|milliseconds| DateTime::from_timestamp_millis(milliseconds).map(|date| date.with_timezone(&Local)))
-        .or_else(|| DateTime::parse_from_rfc3339(value).ok().map(|date| date.with_timezone(&Local)))
+        .and_then(|milliseconds| {
+            DateTime::from_timestamp_millis(milliseconds).map(|date| date.with_timezone(&Local))
+        })
+        .or_else(|| {
+            DateTime::parse_from_rfc3339(value)
+                .ok()
+                .map(|date| date.with_timezone(&Local))
+        })
         .or_else(|| {
             NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.fZ")
                 .ok()

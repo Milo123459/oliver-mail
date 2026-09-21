@@ -1,7 +1,7 @@
 use gpui::{Context, Entity, Window, WindowControlArea, div, prelude::*, px, rgb, svg};
 
-use crate::models::Theme;
 use crate::app::AppState;
+use crate::models::Theme;
 
 pub struct Settings {
     pub theme: Entity<Theme>,
@@ -45,14 +45,11 @@ impl Settings {
                     } else {
                         &theme.text
                     })))
-
                     .when(is_selected, |this| {
                         this.bg(rgb(Theme::color(&theme.selected)))
                     })
-
                     .hover(|this| this.bg(rgb(Theme::color(&theme.surface_hover))))
                     .cursor_pointer()
-
                     .on_click(cx.listener(move |settings, _, _, cx| {
                         settings.selected_theme = name.clone();
                         let selected_theme = settings.selected_theme.clone();
@@ -246,13 +243,11 @@ impl Render for Settings {
                                     .border_1()
                                     .border_color(rgb(Theme::color(&theme.border)))
                                     .cursor_pointer()
-
                                     .on_click(cx.listener(|settings, _, _, cx| {
                                         settings.theme_dropdown_open =
                                             !settings.theme_dropdown_open;
                                         cx.notify();
                                     }))
-                                    
                                     .child(selected_label)
                                     .child("v"),
                             )

@@ -1,38 +1,21 @@
 use anyhow::{Context, Result};
-use axum::{
-    extract::Query,
-    response::Html,
-    routing::get,
-    Router,
-};
-use base64::{
-    engine::general_purpose::URL_SAFE_NO_PAD,
-    Engine,
-};
-use rand::{
-    distr::Alphanumeric,
-    Rng,
-};
+use axum::{Router, extract::Query, response::Html, routing::get};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use futures_util::StreamExt;
+use rand::{Rng, distr::Alphanumeric};
 use serde::{Deserialize, Serialize};
-use sha2::{
-    Digest,
-    Sha256,
-};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::oneshot;
 
-const CLIENT_ID: &str =
-    "830227318434-7mgfk7bucm5mt9sl8271oevg9bjj6vlu.apps.googleusercontent.com";
+const CLIENT_ID: &str = "830227318434-7mgfk7bucm5mt9sl8271oevg9bjj6vlu.apps.googleusercontent.com";
 
-const REDIRECT_URI: &str =
-    "http://127.0.0.1:49152/callback";
+const REDIRECT_URI: &str = "http://127.0.0.1:49152/callback";
 
-const SCOPE: &str =
-    "https://www.googleapis.com/auth/gmail.readonly";
+const SCOPE: &str = "https://www.googleapis.com/auth/gmail.readonly";
 
-const OAUTH_SERVER: &str =
-    "https://mail-server-production-610b.up.railway.app";
+const OAUTH_SERVER: &str = "https://mail-server-production-610b.up.railway.app";
 
 #[derive(Debug, Deserialize)]
 struct CallbackQuery {
@@ -74,10 +57,7 @@ impl GoogleAccount {
     async fn load_email(&mut self) -> Result<()> {
         let access_token = self.ensure_access_token().await?.to_owned();
 
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(20))
-            .build()
-            .context("Failed to create Google profile client")?;
+        let client = crate::runtime::http();
 
         let response = client
             .get("https://gmail.googleapis.com/gmail/v1/users/me/profile")
@@ -90,11 +70,7 @@ impl GoogleAccount {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
 
-            anyhow::bail!(
-                "Failed to load Google account profile: {} {}",
-                status,
-                body
-            );
+            anyhow::bail!("Failed to load Google account profile: {} {}", status, body);
         }
 
         #[derive(Deserialize)]
@@ -117,10 +93,7 @@ impl GoogleAccount {
             return Ok(&self.access_token);
         }
 
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(20))
-            .build()
-            .context("Failed to create OAuth server client")?;
+        let client = crate::runtime::http();
 
         let response = client
             .post(format!("{}/oauth/refresh", OAUTH_SERVER))
@@ -135,11 +108,7 @@ impl GoogleAccount {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
 
-            anyhow::bail!(
-                "Token refresh failed: {} {}",
-                status,
-                body
-            );
+            anyhow::bail!("Token refresh failed: {} {}", status, body);
         }
 
         let tokens = response
@@ -181,10 +150,8 @@ pub async fn login() -> Result<GoogleAccount> {
                 async move {
                     if let Some(error) = query.error.as_deref() {
                         if let Some(sender) = sender.lock().await.take() {
-                            let _ = sender.send(Err(anyhow::anyhow!(
-                                "Google OAuth error: {}",
-                                error
-                            )));
+                            let _ =
+                                sender.send(Err(anyhow::anyhow!("Google OAuth error: {}", error)));
                         }
 
                         return Html(
@@ -263,11 +230,7 @@ pub async fn login() -> Result<GoogleAccount> {
         return Err(error).context("Failed to open Google OAuth page");
     }
 
-    let code = match tokio::time::timeout(
-        Duration::from_secs(120),
-        receiver,
-    )
-    .await {
+    let code = match tokio::time::timeout(Duration::from_secs(120), receiver).await {
         Err(_) => {
             let _ = shutdown_sender.send(());
             callback_server.abort();
@@ -297,10 +260,7 @@ pub async fn login() -> Result<GoogleAccount> {
     let _ = shutdown_sender.send(());
     callback_server.abort();
 
-    let mut account =
-        GoogleAccount::from_tokens(
-            exchange_code(&code, &code_verifier).await?
-        )?;
+    let mut account = GoogleAccount::from_tokens(exchange_code(&code, &code_verifier).await?)?;
 
     account.load_email().await?;
 
@@ -325,14 +285,8 @@ fn generate_code_challenge(code_verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(hash)
 }
 
-async fn exchange_code(
-    code: &str,
-    code_verifier: &str,
-) -> Result<GoogleTokenResponse> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .context("Failed to create OAuth server client")?;
+async fn exchange_code(code: &str, code_verifier: &str) -> Result<GoogleTokenResponse> {
+    let client = crate::runtime::http();
 
     let response = client
         .post(format!("{}/oauth/token", OAUTH_SERVER))
@@ -349,11 +303,7 @@ async fn exchange_code(
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
 
-        anyhow::bail!(
-            "OAuth server token exchange failed: {} {}",
-            status,
-            body
-        );
+        anyhow::bail!("OAuth server token exchange failed: {} {}", status, body);
     }
 
     response
@@ -384,6 +334,8 @@ struct GmailMessage {
 
 #[derive(Debug, Deserialize)]
 struct GmailPayload {
+    #[serde(rename = "mimeType", default)]
+    mime_type: Option<String>,
     headers: Option<Vec<GmailHeader>>,
     body: Option<GmailBody>,
     parts: Option<Vec<GmailPayload>>,
@@ -400,20 +352,21 @@ struct GmailBody {
     data: Option<String>,
 }
 
-pub async fn get_gmail_mail(account: &mut GoogleAccount,limit: usize) -> Result<Vec<super::temp_mail::Email>> {
-    eprintln!("GMAIL LISTENER: START {}", account_key);
-
+pub async fn get_gmail_mail(
+    account: &mut GoogleAccount,
+    limit: usize,
+) -> Result<Vec<super::temp_mail::Email>> {
     let access_token = account.ensure_access_token().await?.to_owned();
 
     let limit = limit.clamp(1, 25);
+    let max_results = limit.to_string();
 
-    let response = reqwest::Client::new()
+    let client = crate::runtime::http();
+
+    let response = client
         .get("https://gmail.googleapis.com/gmail/v1/users/me/messages")
         .bearer_auth(&access_token)
-        .query(&[
-            ("labelIds", "INBOX"),
-            ("maxResults", &limit.to_string()),
-        ])
+        .query(&[("labelIds", "INBOX"), ("maxResults", max_results.as_str())])
         .send()
         .await
         .context("Failed to list Gmail messages")?;
@@ -422,11 +375,7 @@ pub async fn get_gmail_mail(account: &mut GoogleAccount,limit: usize) -> Result<
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
 
-        anyhow::bail!(
-            "Failed to list Gmail messages: {} {}",
-            status,
-            body
-        );
+        anyhow::bail!("Failed to list Gmail messages: {} {}", status, body);
     }
 
     let list = response
@@ -434,39 +383,49 @@ pub async fn get_gmail_mail(account: &mut GoogleAccount,limit: usize) -> Result<
         .await
         .context("Failed to parse Gmail message list")?;
 
-    let client = reqwest::Client::new();
-
-    let mut emails = Vec::new();
-
-    for message_ref in list
+    // Fetch message metadata a few at a time instead of one by one.
+    let ids: Vec<String> = list
         .messages
         .unwrap_or_default()
         .into_iter()
         .take(limit)
-    {
-        let response = client
-            .get(format!(
-                "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
-                message_ref.id
-            ))
-            .bearer_auth(&access_token)
-            .query(&[
-                ("format", "metadata"),
-                ("metadataHeaders", "From"),
-                ("metadataHeaders", "Subject"),
-            ])
-            .send()
-            .await?;
+        .map(|message_ref| message_ref.id)
+        .collect();
 
-        if !response.status().is_success() {
-            continue;
-        }
+    let emails = futures_util::stream::iter(ids)
+        .map(|id| {
+            let access_token = access_token.clone();
+            async move {
+                let response = client
+                    .get(format!(
+                        "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
+                        id
+                    ))
+                    .bearer_auth(&access_token)
+                    .query(&[
+                        ("format", "metadata"),
+                        ("metadataHeaders", "From"),
+                        ("metadataHeaders", "Subject"),
+                    ])
+                    .send()
+                    .await
+                    .ok()?;
 
-        if let Ok(message) = response.json::<GmailMessage>().await {
-            emails.push(to_email(message, false));
-        }
-    }
-    eprintln!("GMAIL LISTENER: FINISHED {}", account_key);
+                if !response.status().is_success() {
+                    return None;
+                }
+
+                response
+                    .json::<GmailMessage>()
+                    .await
+                    .ok()
+                    .map(|message| to_email(message, false))
+            }
+        })
+        .buffered(6)
+        .filter_map(|email| async move { email })
+        .collect::<Vec<_>>()
+        .await;
 
     Ok(emails)
 }
@@ -475,77 +434,37 @@ pub async fn get_gmail_message(
     account: &mut GoogleAccount,
     message_id: &str,
 ) -> Result<super::temp_mail::Email> {
-    eprintln!("GET MESSAGE: starting ensure_access_token");
-
-    let access_token = account
-        .ensure_access_token()
-        .await?
-        .to_owned();
-
-    eprintln!("GET MESSAGE: access token ready");
+    let access_token = account.ensure_access_token().await?.to_owned();
 
     let url = format!(
         "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
         message_id
     );
 
-    eprintln!("GET MESSAGE: requesting {}", message_id);
-
-    let client = reqwest::Client::builder()
-        .http1_only()
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(20))
-        .pool_max_idle_per_host(0)
-        .build()
-        .context("Failed to create Gmail message client")?;
-
-    let response = tokio::time::timeout(
-        Duration::from_secs(10),
-        client
-            .get(&url)
-            .header("Connection", "close")
-            .bearer_auth(&access_token)
-            .query(&[("format", "full")])
-            .send(),
-    )
-    .await
-    .context("Gmail request timed out after 10 seconds")?
-    .context("Failed to load Gmail message")?;
-
-
-    eprintln!(
-        "GET MESSAGE: HTTP response received: {}",
-        response.status()
-    );
+    let response = crate::runtime::http()
+        .get(&url)
+        .bearer_auth(&access_token)
+        .query(&[("format", "full")])
+        .send()
+        .await
+        .context("Failed to load Gmail message")?;
 
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
 
-        anyhow::bail!(
-            "Failed to load Gmail message: {} {}",
-            status,
-            body
-        );
+        anyhow::bail!("Failed to load Gmail message: {} {}", status, body);
     }
-
-    eprintln!("GET MESSAGE: parsing response");
 
     let message = response
         .json::<GmailMessage>()
         .await
         .context("Failed to parse Gmail message")?;
 
-    eprintln!("GET MESSAGE: response parsed");
-
     Ok(to_email(message, true))
 }
 
-
-fn to_email(
-    message: GmailMessage,
-    include_body: bool,
-) -> super::temp_mail::Email {
+fn to_email(message: GmailMessage, include_body: bool) -> super::temp_mail::Email {
     let headers = message
         .payload
         .as_ref()
@@ -582,14 +501,31 @@ fn to_email(
     }
 }
 
+/// Prefer the text/plain part; fall back to text/html (converted to text when
+/// displayed), then to whatever part has data.
 fn extract_body(payload: &GmailPayload) -> String {
-    if let Some(data) = payload
-        .body
-        .as_ref()
-        .and_then(|body| body.data.as_ref())
-    {
-        if let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(data) {
-            return String::from_utf8_lossy(&bytes).into_owned();
+    find_part(payload, Some("text/plain"))
+        .or_else(|| find_part(payload, Some("text/html")))
+        .or_else(|| find_part(payload, None))
+        .unwrap_or_default()
+}
+
+fn find_part(payload: &GmailPayload, mime: Option<&str>) -> Option<String> {
+    let mime_matches = match (mime, payload.mime_type.as_deref()) {
+        (None, _) => true,
+        (Some(wanted), Some(actual)) => actual.eq_ignore_ascii_case(wanted),
+        (Some(_), None) => false,
+    };
+
+    if mime_matches {
+        if let Some(text) = payload
+            .body
+            .as_ref()
+            .and_then(|body| body.data.as_deref())
+            .and_then(decode_base64url)
+            .filter(|text| !text.trim().is_empty())
+        {
+            return Some(text);
         }
     }
 
@@ -598,7 +534,14 @@ fn extract_body(payload: &GmailPayload) -> String {
         .as_deref()
         .unwrap_or_default()
         .iter()
-        .map(extract_body)
-        .find(|body| !body.is_empty())
-        .unwrap_or_default()
+        .find_map(|part| find_part(part, mime))
+}
+
+/// Gmail uses base64url, sometimes with `=` padding, which URL_SAFE_NO_PAD
+/// rejects — strip it first.
+fn decode_base64url(data: &str) -> Option<String> {
+    URL_SAFE_NO_PAD
+        .decode(data.trim_end_matches('='))
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
