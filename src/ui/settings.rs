@@ -1,7 +1,7 @@
 use gpui::{Context, Entity, Window, WindowControlArea, div, prelude::*, px, rgb, svg};
 
-use crate::models::Theme;
 use crate::app::AppState;
+use crate::models::Theme;
 
 pub struct Settings {
     pub theme: Entity<Theme>,
@@ -25,9 +25,9 @@ impl Settings {
             .w(px(280.0))
             .mt(px(4.0))
             .p(px(4.0))
-            .bg(rgb(Theme::color(&theme.surface)))
+            .bg(rgb(theme.surface))
             .border_1()
-            .border_color(rgb(Theme::color(&theme.border)));
+            .border_color(rgb(theme.border));
 
         for available_theme in Theme::available() {
             let name = available_theme.id;
@@ -40,19 +40,14 @@ impl Settings {
                     .w_full()
                     .px(px(10.0))
                     .py(px(8.0))
-                    .text_color(rgb(Theme::color(if is_selected {
-                        &theme.selected_text
+                    .text_color(rgb(if is_selected {
+                        theme.selected_text
                     } else {
-                        &theme.text
-                    })))
-
-                    .when(is_selected, |this| {
-                        this.bg(rgb(Theme::color(&theme.selected)))
-                    })
-
-                    .hover(|this| this.bg(rgb(Theme::color(&theme.surface_hover))))
+                        theme.text
+                    }))
+                    .when(is_selected, |this| this.bg(rgb(theme.selected)))
+                    .hover(|this| this.bg(rgb(theme.surface_hover)))
                     .cursor_pointer()
-
                     .on_click(cx.listener(move |settings, _, _, cx| {
                         settings.selected_theme = name.clone();
                         let selected_theme = settings.selected_theme.clone();
@@ -81,8 +76,8 @@ impl Render for Settings {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(Theme::color(&theme.background)))
-            .text_color(rgb(Theme::color(&theme.text)))
+            .bg(rgb(theme.background))
+            .text_color(rgb(theme.text))
             .font_family("Lilex")
             .child(
                 div()
@@ -90,7 +85,7 @@ impl Render for Settings {
                     .flex()
                     .items_center()
                     .h(px(35.0))
-                    .bg(rgb(Theme::color(&theme.surface_hover)))
+                    .bg(rgb(theme.surface_hover))
                     .child(
                         div()
                             .h_full()
@@ -122,10 +117,8 @@ impl Render for Settings {
                                     .window_control_area(WindowControlArea::Min)
                                     .child(
                                         svg()
-                                            .data(include_bytes!(
-                                                "../../assets/images/minimize.svg"
-                                            ))
-                                            .text_color(rgb(Theme::color(&theme.text)))
+                                            .path("images/minimize.svg")
+                                            .text_color(rgb(theme.text))
                                             .w(px(18.0))
                                             .h(px(18.0)),
                                     ),
@@ -142,16 +135,14 @@ impl Render for Settings {
                                     .window_control_area(WindowControlArea::Max)
                                     .child(if window.is_maximized() {
                                         svg()
-                                            .data(include_bytes!("../../assets/images/restore.svg"))
-                                            .text_color(rgb(Theme::color(&theme.text)))
+                                            .path("images/restore.svg")
+                                            .text_color(rgb(theme.text))
                                             .w(px(18.0))
                                             .h(px(18.0))
                                     } else {
                                         svg()
-                                            .data(include_bytes!(
-                                                "../../assets/images/maximize.svg"
-                                            ))
-                                            .text_color(rgb(Theme::color(&theme.text)))
+                                            .path("images/maximize.svg")
+                                            .text_color(rgb(theme.text))
                                             .w(px(18.0))
                                             .h(px(18.0))
                                     }),
@@ -168,8 +159,8 @@ impl Render for Settings {
                                     .window_control_area(WindowControlArea::Close)
                                     .child(
                                         svg()
-                                            .data(include_bytes!("../../assets/images/close.svg"))
-                                            .text_color(rgb(Theme::color(&theme.text)))
+                                            .path("images/close.svg")
+                                            .text_color(rgb(theme.text))
                                             .w(px(18.0))
                                             .h(px(18.0)),
                                     ),
@@ -187,28 +178,28 @@ impl Render for Settings {
                             .h_full()
                             .px(px(12.0))
                             .py(px(16.0))
-                            .bg(rgb(Theme::color(&theme.surface)))
+                            .bg(rgb(theme.surface))
                             .child(
                                 div()
                                     .px(px(12.0))
                                     .py(px(9.0))
                                     .rounded(px(6.0))
-                                    .bg(rgb(Theme::color(&theme.selected)))
-                                    .text_color(rgb(Theme::color(&theme.selected_text)))
+                                    .bg(rgb(theme.selected))
+                                    .text_color(rgb(theme.selected_text))
                                     .child("General"),
                             )
                             .child(
                                 div()
                                     .px(px(12.0))
                                     .py(px(9.0))
-                                    .text_color(rgb(Theme::color(&theme.text_inactive)))
+                                    .text_color(rgb(theme.text_inactive))
                                     .child("Appearance"),
                             )
                             .child(
                                 div()
                                     .px(px(12.0))
                                     .py(px(9.0))
-                                    .text_color(rgb(Theme::color(&theme.text_inactive)))
+                                    .text_color(rgb(theme.text_inactive))
                                     .child("Accounts"),
                             ),
                     )
@@ -222,14 +213,14 @@ impl Render for Settings {
                                 div()
                                     .mt(px(24.0))
                                     .text_size(px(14.0))
-                                    .text_color(rgb(Theme::color(&theme.text_muted)))
+                                    .text_color(rgb(theme.text_muted))
                                     .child("General application settings"),
                             )
                             .child(
                                 div()
                                     .mt(px(32.0))
                                     .text_size(px(14.0))
-                                    .text_color(rgb(Theme::color(&theme.text)))
+                                    .text_color(rgb(theme.text))
                                     .child("Theme"),
                             )
                             .child(
@@ -242,17 +233,15 @@ impl Render for Settings {
                                     .flex()
                                     .items_center()
                                     .justify_between()
-                                    .bg(rgb(Theme::color(&theme.surface)))
+                                    .bg(rgb(theme.surface))
                                     .border_1()
-                                    .border_color(rgb(Theme::color(&theme.border)))
+                                    .border_color(rgb(theme.border))
                                     .cursor_pointer()
-
                                     .on_click(cx.listener(|settings, _, _, cx| {
                                         settings.theme_dropdown_open =
                                             !settings.theme_dropdown_open;
                                         cx.notify();
                                     }))
-                                    
                                     .child(selected_label)
                                     .child("v"),
                             )
@@ -261,7 +250,7 @@ impl Render for Settings {
                                 div()
                                     .mt(px(40.0))
                                     .text_size(px(14.0))
-                                    .text_color(rgb(Theme::color(&theme.text)))
+                                    .text_color(rgb(theme.text))
                                     .child("Storage"),
                             )
                             .child(

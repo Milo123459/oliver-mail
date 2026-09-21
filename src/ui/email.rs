@@ -1,45 +1,77 @@
 use crate::app::AppState;
 use crate::models::{Email, Theme};
-use gpui::{Context, Entity, Overflow, Render, Window, div, prelude::*, px, rgb};
+use gpui::{Context, Entity, Render, SharedString, Window, div, prelude::*, px, rgb};
 
 pub struct EmailView {
     pub state: Entity<AppState>,
-    pub email: Option<Email>,
     pub theme: Entity<Theme>,
+    email_id: Option<String>,
+    subject: SharedString,
+    from: SharedString,
+    /// Cleaned-up body text, computed once when the email is shown rather
+    /// than on every render.
+    body: SharedString,
 }
 
 impl EmailView {
-    pub fn new(state: Entity<AppState>, theme: Entity<Theme>) -> Self {
+    pub fn new(state: Entity<AppState>, theme: Entity<Theme>, cx: &mut Context<Self>) -> Self {
+        cx.observe(&theme, |_, _, cx| cx.notify()).detach();
+
         Self {
             state,
-            email: None,
             theme,
+            email_id: None,
+            subject: SharedString::default(),
+            from: SharedString::default(),
+            body: SharedString::default(),
         }
+    }
+
+    pub fn show(&mut self, email: Option<Email>, cx: &mut Context<Self>) {
+        match email {
+            Some(email) => {
+                let raw = if email.body.trim().is_empty() {
+                    &email.intro
+                } else {
+                    &email.body
+                };
+                self.body = crate::html_text::display_body(raw).into();
+                self.subject = email.subject.clone().into();
+                self.from = format!("From: {}", email.from).into();
+                self.email_id = Some(email.id);
+            }
+            None => {
+                self.email_id = None;
+                self.subject = SharedString::default();
+                self.from = SharedString::default();
+                self.body = SharedString::default();
+            }
+        }
+        cx.notify();
     }
 }
 
 impl Render for EmailView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme.read(cx).clone();
-        let Some(email) = self.email.clone() else {
+        let Some(email_id) = self.email_id.as_deref() else {
             return div().into_any_element();
         };
         let state = self.state.clone();
 
         div()
-            .w_full()
-            .h_full()
+            .size_full()
             .min_h(px(0.0))
             .px(px(24.0))
             .py(px(20.0))
             .flex()
             .flex_col()
-            .bg(rgb(Theme::color(&theme.background)))
+            .bg(rgb(theme.background))
             .child(
                 div()
                     .id("back-to-inbox")
                     .cursor_pointer()
-                    .text_color(rgb(Theme::color(&theme.text)))
+                    .text_color(rgb(theme.text))
                     .on_click(move |_event, _window, cx| {
                         state.update(cx, |state, cx| {
                             state.selected_message = None;
@@ -51,32 +83,30 @@ impl Render for EmailView {
             .child(
                 div()
                     .text_size(px(22.0))
-                    .text_color(rgb(Theme::color(&theme.text)))
-                    .child(email.subject),
+                    .text_color(rgb(theme.text))
+                    .child(self.subject.clone()),
             )
             .child(
                 div()
                     .mt(px(12.0))
                     .text_size(px(14.0))
-                    .text_color(rgb(Theme::color(&theme.text_muted)))
-                    .child(format!("From: {}", email.from)),
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.from.clone()),
             )
             .child(
                 div()
+                    // Keyed by email so each one opens scrolled to the top.
+                    .id(format!("email-body-{email_id}"))
                     .mt(px(24.0))
                     .flex_1()
                     .min_h(px(0.0))
-                    //.overflow_y_scroll()
+                    .overflow_y_scroll()
                     .pr(px(12.0))
                     .child(
                         div()
                             .text_size(px(15.0))
-                            .text_color(rgb(Theme::color(&theme.text_muted)))
-                            .child(if email.body.is_empty() {
-                                email.intro
-                            } else {
-                                email.body
-                            }),
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.body.clone()),
                     ),
             )
             .into_any_element()

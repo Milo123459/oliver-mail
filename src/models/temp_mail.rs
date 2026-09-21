@@ -1,3 +1,4 @@
+use anyhow::{Context, Result, bail};
 use rand::{Rng, distr::Alphanumeric};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -63,8 +64,8 @@ fn random_string(length: usize) -> String {
         .collect()
 }
 
-pub async fn create_account() -> Result<TempEmail, Box<dyn std::error::Error>> {
-    let client = Client::new();
+pub async fn create_account() -> Result<TempEmail> {
+    let client = crate::runtime::http();
 
     let username = random_string(12).to_lowercase();
     let password = random_string(20);
@@ -73,7 +74,7 @@ pub async fn create_account() -> Result<TempEmail, Box<dyn std::error::Error>> {
     let domains: serde_json::Value = domains_response.json().await?;
     let domain = domains["hydra:member"][0]["domain"]
         .as_str()
-        .ok_or("No domain available")?;
+        .context("No mail.tm domain available")?;
 
     let address = format!("{}@{}", username, domain);
 
@@ -87,7 +88,7 @@ pub async fn create_account() -> Result<TempEmail, Box<dyn std::error::Error>> {
         let status = response.status();
         let body = response.text().await?;
 
-        return Err(format!("Failed to create account: {} - {}", status, body).into());
+        bail!("Failed to create account: {} - {}", status, body);
     }
 
     let token_response = client
@@ -103,7 +104,7 @@ pub async fn create_account() -> Result<TempEmail, Box<dyn std::error::Error>> {
         let status = token_response.status();
         let body = token_response.text().await?;
 
-        return Err(format!("Failed to login to Mail.tm: {} - {}", status, body).into());
+        bail!("Failed to login to Mail.tm: {} - {}", status, body);
     }
 
     let account: AccountResponse = response.json().await?;
@@ -124,10 +125,7 @@ pub async fn create_account() -> Result<TempEmail, Box<dyn std::error::Error>> {
     })
 }
 
-async fn get_token(
-    client: &Client,
-    email: &TempEmail,
-) -> Result<String, Box<dyn std::error::Error>> {
+async fn get_token(client: &Client, email: &TempEmail) -> Result<String> {
     let response = client
         .post("https://api.mail.tm/token")
         .json(&json!({
@@ -138,12 +136,9 @@ async fn get_token(
         .await?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Failed to login to Mail.tm: {} - {}",
-            response.status(),
-            response.text().await?
-        )
-        .into());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        bail!("Failed to login to Mail.tm: {} - {}", status, body);
     }
 
     let token: TokenResponse = response.json().await?;
@@ -151,13 +146,13 @@ async fn get_token(
     Ok(token.token)
 }
 
-pub async fn refresh_token(email: &TempEmail) -> Result<String, Box<dyn std::error::Error>> {
-    get_token(&Client::new(), email).await
+pub async fn refresh_token(email: &TempEmail) -> Result<String> {
+    get_token(crate::runtime::http(), email).await
 }
 
-pub async fn get_mail(email: &TempEmail) -> Result<Vec<Email>, Box<dyn std::error::Error>> {
-    let client = Client::new();
-    let token = get_token(&client, email).await?;
+pub async fn get_mail(email: &TempEmail) -> Result<Vec<Email>> {
+    let client = crate::runtime::http();
+    let token = get_token(client, email).await?;
 
     let response = client
         .get("https://api.mail.tm/messages")
@@ -166,12 +161,9 @@ pub async fn get_mail(email: &TempEmail) -> Result<Vec<Email>, Box<dyn std::erro
         .await?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Failed to retrieve mail: {} - {}",
-            response.status(),
-            response.text().await?
-        )
-        .into());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        bail!("Failed to retrieve mail: {} - {}", status, body);
     }
 
     let messages: MessagesResponse = response.json().await?;

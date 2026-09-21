@@ -1,15 +1,39 @@
-use crate::app::AppState;
-use crate::models::{Email, GoogleAccount, Theme, get_gmail_mail, get_gmail_message, get_mail, refresh_token};
+use std::ops::Range;
+
+use crate::app::{AppState, SidebarEmail};
+use crate::models::{
+    Email, GoogleAccount, TempEmail, Theme, get_gmail_mail, get_gmail_message, get_mail,
+    refresh_token,
+};
 use crate::ui::EmailView;
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use futures_util::StreamExt;
-use gpui::{Context, Entity, Render, Task, Window, div, prelude::*, px, rgb};
+use gpui::{
+    AnyElement, Context, Entity, Render, Task, UniformListScrollHandle, Window, div, prelude::*,
+    px, rgb, uniform_list,
+};
 use reqwest_eventsource::{Event, EventSource};
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 
 enum Account {
-    Temp(crate::models::TempEmail),
-    Google(usize, GoogleAccount),
+    Temp(TempEmail),
+    Google(GoogleAccount),
+}
+
+impl Account {
+    fn key(&self) -> String {
+        match self {
+            Account::Temp(account) => format!("temp:{}", account.id),
+            Account::Google(account) => format!("google:{}", account.email),
+        }
+    }
+}
+
+/// Messages from the temp-mail listener (running on tokio) to the UI.
+enum TempMailEvent {
+    Token(String),
+    Emails(Vec<Email>),
+    Failed,
 }
 
 pub struct Inbox {
@@ -18,9 +42,15 @@ pub struct Inbox {
     pub state: Entity<AppState>,
     pub theme: Entity<Theme>,
     pub email_view: Entity<EmailView>,
-    mail_task: Option<Task<Result<(), anyhow::Error>>>,
-    cancel_sender: Option<oneshot::Sender<()>>,
+    /// The listener for the selected account. Replacing or dropping it cancels
+    /// the previous one, including its network work on tokio.
+    mail_task: Option<Task<()>>,
+    /// The Gmail message currently being opened. Only one at a time: clicking
+    /// another email drops (cancels) the previous request.
+    open_task: Option<Task<()>>,
+    opening_message_id: Option<String>,
     active_account_id: Option<String>,
+    list_scroll: UniformListScrollHandle,
 }
 
 impl Inbox {
@@ -30,320 +60,267 @@ impl Inbox {
         theme: Entity<Theme>,
         cx: &mut Context<Self>,
     ) -> Inbox {
+        cx.observe(&state, |this, _state, cx| {
+            this.sync_selected_account(cx);
+            cx.notify();
+        })
+        .detach();
+        cx.observe(&theme, |_, _, cx| cx.notify()).detach();
+
         let mut inbox = Self {
             emails: Vec::new(),
             loading: false,
-            state: state.clone(),
+            state,
             theme,
             email_view,
             mail_task: None,
-            cancel_sender: None,
+            open_task: None,
+            opening_message_id: None,
             active_account_id: None,
+            list_scroll: UniformListScrollHandle::new(),
         };
-
-        cx.observe(&state, |this, state, cx| {
-            let selected_account = {
-                let state = state.read(cx);
-
-                match state.selected_sidebar_email {
-                    Some(crate::app::SidebarEmail::Temp(index)) => state
-                        .temp_email
-                        .get(index)
-                        .cloned()
-                        .map(|account| (format!("temp:{}", account.id), Account::Temp(account))),
-                    Some(crate::app::SidebarEmail::Google(index)) => state
-                        .google_accounts
-                        .get(index)
-                        .cloned()
-                        .map(|account| (format!("google:{}", account.email), Account::Google(index, account))),
-                    _ => None,
-                }
-            };
-
-            if let Some((account_id, account)) = selected_account {
-                if this.active_account_id.as_deref() != Some(account_id.as_str()) {
-                    match account {
-                        Account::Temp(account) => this.start_mail_listener(account, cx),
-                        Account::Google(index, account) => {
-                            this.start_google_listener(index, account, cx)
-                        }
-                    }
-                }
-            } else {
-                if let Some(cancel_sender) = this.cancel_sender.take() {
-                    let _ = cancel_sender.send(());
-                }
-                this.mail_task = None;
-                this.active_account_id = None;
-                this.emails.clear();
-                this.email_view.update(cx, |email_view, _cx| {
-                    email_view.email = None;
-                });
-                state.update(cx, |state, _cx| {
-                    state.selected_message = None;
-                });
-                this.loading = false;
-                cx.notify();
-            }
-        })
-        .detach();
-
-        let selected_account = {
-            let state = state.read(cx);
-            match state.selected_sidebar_email {
-                Some(crate::app::SidebarEmail::Temp(index)) => state
-                    .temp_email
-                    .get(index)
-                    .cloned()
-                    .map(Account::Temp),
-                Some(crate::app::SidebarEmail::Google(index)) => state
-                    .google_accounts
-                    .get(index)
-                    .cloned()
-                    .map(|account| Account::Google(index, account)),
-                _ => None,
-            }
-        };
-        match selected_account {
-            Some(Account::Temp(account)) => inbox.start_mail_listener(account, cx),
-            Some(Account::Google(index, account)) => inbox.start_google_listener(index, account, cx),
-            None => {}
-        }
-
+        inbox.sync_selected_account(cx);
         inbox
     }
 
-    fn start_google_listener(&mut self, account_index: usize, mut account: GoogleAccount, cx: &mut Context<Self>) {
-        if let Some(cancel_sender) = self.cancel_sender.take() {
-            let _ = cancel_sender.send(());
-        }
-
-        self.mail_task = None;
-
-        let account_key = format!("google:{}", account.email);
-
-        self.active_account_id = Some(account_key.clone());
-
-        self.emails = self
-            .state
-            .read(cx)
-            .email_cache
-            .get(&account_key)
-            .cloned()
-            .unwrap_or_default();
-
-        self.email_view.update(cx, |email_view, _cx| {
-            email_view.email = None;
-        });
-
-        self.state.update(cx, |state, _cx| {
-            state.selected_message = None;
-        });
-
-        self.loading = true;
-        cx.notify();
-
-        let (cancel_sender, mut cancel_receiver) = oneshot::channel();
-        self.cancel_sender = Some(cancel_sender);
-
-        let state = self.state.clone();
-
-        let task = cx.spawn(async move |this, cx| {
-            let result = tokio::select! {
-                _ = &mut cancel_receiver => {
-                    eprintln!(
-                        "GMAIL LISTENER: cancelled {}",
-                        account_key
-                    );
-
-                    return Ok::<(), anyhow::Error>(());
-                }
-
-                result = get_gmail_mail(&mut account, 25) => {
-                    result
-                }
-            };
-
-            match result {
-                Ok(emails) => {
-                    eprintln!(
-                        "GMAIL LISTENER: loaded {} emails for {}",
-                        emails.len(),
-                        account_key
-                    );
-
-                    /*
-                    * IMPORTANT:
-                    *
-                    * Do not persist here.
-                    *
-                    * state.persist() performs synchronous serialization/file I/O
-                    * and can block the GPUI application while switching accounts.
-                    */
-                    state.update(cx, |state, cx| {
-                        state.google_accounts[account_index] = account.clone();
-                        cx.notify();
-                    });
-
-                    this.update(cx, |inbox, cx| {
-                        if inbox.active_account_id.as_deref()
-                            != Some(account_key.as_str())
-                        {
-                            return;
-                        }
-
-                        inbox.merge_emails(emails);
-
-                        /*
-                        * Do not persist the complete email cache here either.
-                        *
-                        * We want to determine whether synchronous persistence
-                        * is responsible for the freeze.
-                        */
-
-                        inbox.loading = false;
-                        cx.notify();
-                    })?;
-                }
-
-                Err(error) => {
-                    eprintln!("Failed to retrieve Gmail: {error:#}");
-
-                    this.update(cx, |inbox, cx| {
-                        if inbox.active_account_id.as_deref()
-                            != Some(account_key.as_str())
-                        {
-                            return;
-                        }
-
-                        inbox.loading = false;
-                        cx.notify();
-                    })?;
-                }
+    fn selected_account(&self, cx: &Context<Self>) -> Option<Account> {
+        let state = self.state.read(cx);
+        match state.selected_sidebar_email {
+            Some(SidebarEmail::Temp(index)) => {
+                state.temp_email.get(index).cloned().map(Account::Temp)
             }
-
-            Ok::<(), anyhow::Error>(())
-        });
-
-        self.mail_task = Some(task);
+            Some(SidebarEmail::Google(index)) => state
+                .google_accounts
+                .get(index)
+                .cloned()
+                .map(Account::Google),
+            _ => None,
+        }
     }
 
-    fn start_mail_listener(&mut self, mut account: crate::models::TempEmail, cx: &mut Context<Self>) {
-        if let Some(cancel_sender) = self.cancel_sender.take() {
-            let _ = cancel_sender.send(());
+    /// Starts a listener when the selected account changes, or clears the
+    /// inbox when nothing is selected.
+    fn sync_selected_account(&mut self, cx: &mut Context<Self>) {
+        match self.selected_account(cx) {
+            Some(account) => {
+                if self.active_account_id.as_deref() != Some(account.key().as_str()) {
+                    match account {
+                        Account::Temp(account) => self.start_mail_listener(account, cx),
+                        Account::Google(account) => self.start_google_listener(account, cx),
+                    }
+                }
+            }
+            None => {
+                if self.active_account_id.is_some() || !self.emails.is_empty() {
+                    self.mail_task = None;
+                    self.cancel_open();
+                    self.active_account_id = None;
+                    self.emails.clear();
+                    self.loading = false;
+                    self.close_email(cx);
+                }
+            }
         }
+    }
+
+    /// Shared setup when switching to an account: cancel the old listener and
+    /// any email being opened, show cached mail straight away.
+    fn switch_to(&mut self, account_key: &str, cx: &mut Context<Self>) {
         self.mail_task = None;
-        let account_key = format!("temp:{}", account.id);
-        self.active_account_id = Some(account_key.clone());
+        self.cancel_open();
+        self.active_account_id = Some(account_key.to_string());
         self.emails = self
             .state
             .read(cx)
             .email_cache
-            .get(&account_key)
+            .get(account_key)
             .cloned()
             .unwrap_or_default();
-        self.email_view.update(cx, |email_view, _cx| {
-            email_view.email = None;
-        });
-        self.state.update(cx, |state, _cx| {
-            state.selected_message = None;
-        });
+        self.close_email(cx);
         self.loading = true;
         cx.notify();
+    }
 
-        let (cancel_sender, mut cancel_receiver) = oneshot::channel();
-        self.cancel_sender = Some(cancel_sender);
-        let state = self.state.clone();
-        let task = cx.spawn(async move |this, cx| {
-            if let Ok(token) = refresh_token(&account).await {
-                account.token = token;
-                state.update(cx, |state, _cx| {
-                    if let Some(saved_account) = state
-                        .temp_email
-                        .iter_mut()
-                        .find(|saved_account| saved_account.id == account.id)
-                    {
-                        saved_account.token = account.token.clone();
+    fn start_google_listener(&mut self, mut account: GoogleAccount, cx: &mut Context<Self>) {
+        let account_key = format!("google:{}", account.email);
+        self.switch_to(&account_key, cx);
+
+        let io = crate::runtime::spawn(async move {
+            let result = get_gmail_mail(&mut account, 25).await;
+            (account, result)
+        });
+
+        self.mail_task = Some(cx.spawn(async move |this, cx| {
+            let result = io.await;
+
+            let _ = this.update(cx, |inbox, cx| {
+                if inbox.active_account_id.as_deref() != Some(account_key.as_str()) {
+                    return;
+                }
+                inbox.loading = false;
+
+                match result {
+                    Ok((account, Ok(emails))) => {
+                        inbox.store_google_account(account, cx);
+                        inbox.merge_emails(emails);
+                    }
+                    Ok((_, Err(error))) => eprintln!("Failed to retrieve Gmail: {error:#}"),
+                    Err(error) => eprintln!("Gmail task stopped: {error}"),
+                }
+
+                cx.notify();
+            });
+        }));
+    }
+
+    fn start_mail_listener(&mut self, account: TempEmail, cx: &mut Context<Self>) {
+        let account_key = format!("temp:{}", account.id);
+        let account_id = account.id.clone();
+        self.switch_to(&account_key, cx);
+
+        // The network side (token refresh, fetch, live SSE stream) runs on
+        // tokio and sends results back over a channel.
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let io = crate::runtime::spawn(temp_mail_listener(account, sender));
+
+        self.mail_task = Some(cx.spawn(async move |this, cx| {
+            // Held for the life of this task; dropping it aborts the tokio side.
+            let _io = io;
+
+            while let Some(event) = receiver.recv().await {
+                let updated = this.update(cx, |inbox, cx| {
+                    inbox.handle_temp_event(&account_key, &account_id, event, cx)
+                });
+                if updated.is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
+    fn handle_temp_event(
+        &mut self,
+        account_key: &str,
+        account_id: &str,
+        event: TempMailEvent,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_account_id.as_deref() != Some(account_key) {
+            return;
+        }
+
+        match event {
+            TempMailEvent::Token(token) => {
+                self.state.update(cx, |state, _cx| {
+                    if let Some(saved) = state.temp_email.iter_mut().find(|a| a.id == account_id) {
+                        saved.token = token;
                     }
                     state.persist();
                 });
             }
-
-            match get_mail(&account).await {
-                Ok(emails) => {
-                    this.update(cx, |inbox, cx| {
-                        if inbox.active_account_id.as_deref() != Some(account_key.as_str()) {
-                            return;
-                        }
-                        inbox.merge_emails(emails);
-                        inbox.persist_emails(cx);
-                        inbox.loading = false;
-                        cx.notify();
-                    })?;
-                }
-
-                Err(error) => {
-                    eprintln!("Failed to retrieve mail: {}", error);
-
-                    this.update(cx, |inbox, cx| {
-                        if inbox.active_account_id.as_deref() != Some(account_key.as_str()) {
-                            return;
-                        }
-                        inbox.loading = false;
-                        cx.notify();
-                    })?;
-                }
+            TempMailEvent::Emails(emails) => {
+                self.merge_emails(emails);
+                self.persist_emails(cx);
+                self.loading = false;
             }
+            TempMailEvent::Failed => self.loading = false,
+        }
 
-            let url = format!(
-                "https://mercure.mail.tm/.well-known/mercure?topic=/accounts/{}",
-                account.id
-            );
-            let client = reqwest::Client::new();
-            let request = client
-                .get(&url)
-                .header(
-                    reqwest::header::AUTHORIZATION,
-                    format!("Bearer {}", account.token),
-                )
-                .header(reqwest::header::ACCEPT, "text/event-stream");
-            let mut events = EventSource::new(request)?;
+        cx.notify();
+    }
 
-            loop {
-                let event = tokio::select! {
-                    _ = &mut cancel_receiver => break,
-                    event = events.next() => event,
-                };
+    fn open_email(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        let Some(email) = self
+            .emails
+            .iter()
+            .find(|email| email.id == message_id)
+            .cloned()
+        else {
+            return;
+        };
 
-                let Some(event) = event else {
-                    break;
-                };
-
-                match event {
-                    Ok(Event::Open) => {}
-                    Ok(Event::Message(_)) => match get_mail(&account).await {
-                        Ok(emails) => {
-                            this.update(cx, |inbox, cx| {
-                                if inbox.active_account_id.as_deref()
-                                    != Some(account_key.as_str())
-                                {
-                                    return;
-                                }
-                                inbox.merge_emails(emails);
-                                inbox.persist_emails(cx);
-                                cx.notify();
-                            })?;
-                        }
-                        Err(error) => eprintln!("Failed to refresh temporary mail: {error}"),
-                    },
-                    Err(error) => eprintln!("Temporary mail connection error: {error}"),
-                }
+        let google_account = {
+            let state = self.state.read(cx);
+            match state.selected_sidebar_email {
+                Some(SidebarEmail::Google(index)) => state.google_accounts.get(index).cloned(),
+                _ => None,
             }
+        };
 
-            Ok::<(), anyhow::Error>(())
+        // Temp mail, or a Gmail message whose body we already fetched.
+        let Some(mut account) = google_account.filter(|_| email.body.is_empty()) else {
+            self.cancel_open();
+            self.show_email(email, cx);
+            return;
+        };
+
+        if self.opening_message_id.as_deref() == Some(message_id) {
+            return; // already loading this one
+        }
+
+        // Replacing the task drops (cancels) any previous open request.
+        self.opening_message_id = Some(email.id.clone());
+        let message_id = email.id.clone();
+        let io = crate::runtime::spawn(async move {
+            let result = get_gmail_message(&mut account, &message_id).await;
+            (account, result)
         });
 
-        self.mail_task = Some(task);
+        self.open_task = Some(cx.spawn(async move |this, cx| {
+            let result = io.await;
+
+            let _ = this.update(cx, |inbox, cx| {
+                inbox.opening_message_id = None;
+                match result {
+                    Ok((account, Ok(full_email))) => {
+                        inbox.store_google_account(account, cx);
+                        // Keep the body so reopening this email is instant.
+                        inbox.merge_emails(vec![full_email.clone()]);
+                        inbox.show_email(full_email, cx);
+                    }
+                    Ok((_, Err(error))) => eprintln!("Failed to load Gmail message: {error:#}"),
+                    Err(error) => eprintln!("Gmail message task stopped: {error}"),
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    fn cancel_open(&mut self) {
+        self.open_task = None;
+        self.opening_message_id = None;
+    }
+
+    fn show_email(&mut self, email: Email, cx: &mut Context<Self>) {
+        self.email_view
+            .update(cx, |view, cx| view.show(Some(email.clone()), cx));
+        self.state.update(cx, |state, cx| {
+            state.selected_message = Some(email);
+            cx.notify();
+        });
+    }
+
+    fn close_email(&mut self, cx: &mut Context<Self>) {
+        self.email_view.update(cx, |view, cx| view.show(None, cx));
+        self.state.update(cx, |state, _cx| {
+            state.selected_message = None;
+        });
+    }
+
+    /// Saves a (possibly token-refreshed) Google account back into state.
+    /// Looks it up by email rather than index, so it can't panic if the
+    /// account list changed while the request was running.
+    fn store_google_account(&mut self, account: GoogleAccount, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, _cx| {
+            if let Some(saved) = state
+                .google_accounts
+                .iter_mut()
+                .find(|saved| saved.email == account.email)
+            {
+                *saved = account;
+            }
+        });
     }
 
     fn merge_emails(&mut self, emails: Vec<Email>) {
@@ -363,7 +340,6 @@ impl Inbox {
 
         self.emails
             .sort_by(|left, right| right.created_at.cmp(&left.created_at));
-
     }
 
     fn persist_emails(&self, cx: &mut Context<Self>) {
@@ -375,6 +351,125 @@ impl Inbox {
             });
         }
     }
+
+    fn render_rows(&mut self, range: Range<usize>, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let theme = self.theme.read(cx).clone();
+
+        self.emails[range.start.min(self.emails.len())..range.end.min(self.emails.len())]
+            .iter()
+            .map(|email| {
+                let message_id = email.id.clone();
+                let is_opening = self.opening_message_id.as_deref() == Some(email.id.as_str());
+
+                div()
+                    .id(format!("email-{}", email.id))
+                    .w_full()
+                    .h(px(52.0))
+                    .px(px(24.0))
+                    .flex()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(rgb(theme.border))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |inbox, _event, _window, cx| {
+                        inbox.open_email(&message_id, cx);
+                    }))
+                    // Sender
+                    .child(
+                        div()
+                            .w(px(220.0))
+                            .text_size(px(14.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(truncate_text(&sender_name(&email.from), 28)),
+                    )
+                    // Subject
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .ml_auto()
+                            .text_size(px(14.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(truncate_text(&email.subject, 48)),
+                    )
+                    .child(
+                        div()
+                            .w(px(80.0))
+                            .ml(px(6.0))
+                            .text_size(px(12.0))
+                            .text_color(rgb(0x777777))
+                            .child(if is_opening {
+                                "Opening…".to_string()
+                            } else {
+                                email_date(&email.created_at)
+                            }),
+                    )
+                    .into_any_element()
+            })
+            .collect()
+    }
+}
+
+/// Runs on tokio. Refreshes the token, loads mail, then listens to mail.tm's
+/// live stream and reloads whenever something arrives. Stops when the UI side
+/// goes away (channel closed) or the task is aborted.
+async fn temp_mail_listener(mut account: TempEmail, sender: mpsc::UnboundedSender<TempMailEvent>) {
+    if let Ok(token) = refresh_token(&account).await {
+        account.token = token.clone();
+        if sender.send(TempMailEvent::Token(token)).is_err() {
+            return;
+        }
+    }
+
+    match get_mail(&account).await {
+        Ok(emails) => {
+            if sender.send(TempMailEvent::Emails(emails)).is_err() {
+                return;
+            }
+        }
+        Err(error) => {
+            eprintln!("Failed to retrieve mail: {error:#}");
+            let _ = sender.send(TempMailEvent::Failed);
+        }
+    }
+
+    let url = format!(
+        "https://mercure.mail.tm/.well-known/mercure?topic=/accounts/{}",
+        account.id
+    );
+    let request = crate::runtime::http_streaming()
+        .get(&url)
+        .bearer_auth(&account.token)
+        .header(reqwest::header::ACCEPT, "text/event-stream");
+
+    let mut events = match EventSource::new(request) {
+        Ok(events) => events,
+        Err(error) => {
+            eprintln!("Failed to open temporary mail stream: {error}");
+            return;
+        }
+    };
+
+    while let Some(event) = events.next().await {
+        if sender.is_closed() {
+            break;
+        }
+
+        match event {
+            Ok(Event::Open) => {}
+            Ok(Event::Message(_)) => match get_mail(&account).await {
+                Ok(emails) => {
+                    if sender.send(TempMailEvent::Emails(emails)).is_err() {
+                        break;
+                    }
+                }
+                Err(error) => eprintln!("Failed to refresh temporary mail: {error:#}"),
+            },
+            Err(error) => eprintln!("Temporary mail connection error: {error}"),
+        }
+    }
+
+    events.close();
 }
 
 fn sender_name(sender: &str) -> String {
@@ -406,8 +501,14 @@ fn email_date(value: &str) -> String {
     let date = value
         .parse::<i64>()
         .ok()
-        .and_then(|milliseconds| DateTime::from_timestamp_millis(milliseconds).map(|date| date.with_timezone(&Local)))
-        .or_else(|| DateTime::parse_from_rfc3339(value).ok().map(|date| date.with_timezone(&Local)))
+        .and_then(|milliseconds| {
+            DateTime::from_timestamp_millis(milliseconds).map(|date| date.with_timezone(&Local))
+        })
+        .or_else(|| {
+            DateTime::parse_from_rfc3339(value)
+                .ok()
+                .map(|date| date.with_timezone(&Local))
+        })
         .or_else(|| {
             NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.fZ")
                 .ok()
@@ -431,165 +532,67 @@ impl Render for Inbox {
         let theme = self.theme.read(cx).clone();
         let selected_account = self.state.read(cx).selected_sidebar_email;
         let has_selected_account = selected_account.is_some();
-        let loading_label = match selected_account {
-            Some(crate::app::SidebarEmail::Google(index)) => self
-                .state
-                .read(cx)
-                .google_accounts
-                .get(index)
-                .map(|account| account.email.clone())
-                .unwrap_or_else(|| "Gmail".to_string()),
-            Some(crate::app::SidebarEmail::Temp(index)) => self
-                .state
-                .read(cx)
-                .temp_email
-                .get(index)
-                .map(|account| account.address.clone())
-                .unwrap_or_else(|| "temporary email".to_string()),
-            _ => "inbox".to_string(),
+
+        let placeholder = |text: String| {
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .text_size(px(14.0))
+                        .text_color(rgb(0x777777))
+                        .child(text),
+                )
+                .into_any_element()
         };
+
+        let content = if !has_selected_account {
+            placeholder("Select an inbox".to_string())
+        } else if self.emails.is_empty() {
+            placeholder(if self.loading {
+                let label = match selected_account {
+                    Some(SidebarEmail::Google(index)) => self
+                        .state
+                        .read(cx)
+                        .google_accounts
+                        .get(index)
+                        .map(|account| account.email.clone())
+                        .unwrap_or_else(|| "Gmail".to_string()),
+                    Some(SidebarEmail::Temp(index)) => self
+                        .state
+                        .read(cx)
+                        .temp_email
+                        .get(index)
+                        .map(|account| account.address.clone())
+                        .unwrap_or_else(|| "temporary email".to_string()),
+                    _ => "inbox".to_string(),
+                };
+                format!("Loading {label}")
+            } else {
+                "No messages".to_string()
+            })
+        } else {
+            // Only the rows on screen are built and laid out.
+            uniform_list(
+                "email-list",
+                self.emails.len(),
+                cx.processor(|inbox, range: Range<usize>, _window, cx| {
+                    inbox.render_rows(range, cx)
+                }),
+            )
+            .track_scroll(&self.list_scroll)
+            .size_full()
+            .into_any_element()
+        };
+
         div()
-            .w_full()
-            .h_full()
+            .size_full()
             .min_h(px(0.0))
-            .bg(rgb(Theme::color(&theme.background)))
+            .bg(rgb(theme.background))
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .w_full()
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .when(!has_selected_account, |this| {
-                        this.items_center().justify_center().child(
-                            div()
-                                .text_size(px(14.0))
-                                .text_color(rgb(0x777777))
-                                .child("Select an inbox"),
-                        )
-                    })
-                    .when(
-                        has_selected_account && self.emails.is_empty(),
-                        |this| {
-                            this.items_center().justify_center().child(
-                                div()
-                                    .text_size(px(14.0))
-                                    .text_color(rgb(0x777777))
-                                    .child(if self.loading {
-                                        format!("Loading {loading_label}")
-                                    } else {
-                                        "No messages".to_string()
-                                    }),
-                            )
-                        },
-                    )
-                    .when(
-                        has_selected_account && !self.emails.is_empty(),
-                        |this| {
-                            this.children(self.emails.iter().map(|email| {
-                                div()
-                                    .w_full()
-                                    .h(px(52.0))
-                                    .px(px(24.0))
-                                    .flex()
-                                    .items_center()
-                                    .border_b_1()
-                                    .border_color(rgb(Theme::color(&theme.border)))
-                                    .id(format!("email-{}", email.id))
-                                    .cursor_pointer()
-                                    .on_click({
-                                        let state = self.state.clone();
-                                        let email_view = self.email_view.clone();
-                                        let email = email.clone();
-
-                                        move |_event, _window, cx| {
-                                            let google_index = match state.read(cx).selected_sidebar_email {
-                                                Some(crate::app::SidebarEmail::Google(index)) => Some(index),
-                                                _ => None,
-                                            };
-
-                                            if let Some(google_index) = google_index {
-                                                dbg!("LOCKED state received");
-                                                let account = state.read(cx).google_accounts[google_index].clone();
-                                                let state_for_task = state.clone();
-                                                let email_view_for_task = email_view.clone();
-                                                let message_id = email.id.clone();
-                                                cx.spawn(async move |cx2| {
-                                                    let mut account = account;
-
-                                                    eprintln!("OPENING GMAIL MESSAGE: {}", message_id);
-
-                                                    match get_gmail_message(&mut account, &message_id).await {
-                                                        Ok(full_email) => {
-                                                            eprintln!(
-                                                                "GMAIL MESSAGE LOADED: id={}, body_chars={}, subject_chars={}",
-                                                                full_email.id,
-                                                                full_email.body.chars().count(),
-                                                                full_email.subject.chars().count()
-                                                            );
-
-                                                            state_for_task.update(cx2, |state, cx| {
-                                                                state.google_accounts[google_index] = account;
-                                                                state.selected_message = Some(full_email.clone());
-                                                                cx.notify();
-                                                            });
-
-                                                            eprintln!("UPDATING EMAIL VIEW");
-
-                                                            email_view_for_task.update(cx2, |email_view, _cx| {
-                                                                email_view.email = Some(full_email);
-                                                            });
-
-                                                            eprintln!("EMAIL VIEW UPDATED");
-
-                                                        }
-                                                        Err(error) => eprintln!("Failed to load Gmail message: {error:#}"),
-                                                    }
-                                                    Ok::<(), anyhow::Error>(())
-                                                }).detach();
-                                                dbg!("DETATCHED AND STATE IS NO LONGER LOCKED ( ITHINK )");
-                                            } else {
-                                                email_view.update(cx, |email_view, _cx| {
-                                                    email_view.email = Some(email.clone());
-                                                });
-                                                state.update(cx, |state, cx| {
-                                                    state.selected_message = Some(email.clone());
-                                                    cx.notify();
-                                                });
-                                            }
-                                        }
-                                    })
-                                    // Sender
-                                    .child(
-                                        div()
-                                            .w(px(220.0))
-                                            .text_size(px(14.0))
-                                            .text_color(rgb(Theme::color(&theme.text_muted)))
-                                            .child(truncate_text(&sender_name(&email.from), 28)),
-                                    )
-                                    // Subject
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w(px(0.0))
-                                            .ml_auto()
-                                            .text_size(px(14.0))
-                                            .text_color(rgb(Theme::color(&theme.text_muted)))
-                                            .child(truncate_text(&email.subject, 48)),
-                                    )
-                                    .child(
-                                        div()
-                                            .w(px(80.0))
-                                            .ml(px(6.0))
-                                            .text_size(px(12.0))
-                                            .text_color(rgb(0x777777))
-                                            .child(email_date(&email.created_at)),
-                                    )
-                                    .into_any_element()
-                            }))
-                        },
-                    ),
-            )
+            .child(div().flex_1().min_h(px(0.0)).w_full().child(content))
     }
 }

@@ -5,6 +5,13 @@ pub struct MailTopBar {
     pub theme: Entity<Theme>,
 }
 
+impl MailTopBar {
+    pub fn new(theme: Entity<Theme>, cx: &mut Context<Self>) -> Self {
+        cx.observe(&theme, |_, _, cx| cx.notify()).detach();
+        Self { theme }
+    }
+}
+
 impl Render for MailTopBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme.read(cx).clone();
@@ -14,21 +21,21 @@ impl Render for MailTopBar {
             .flex_shrink_0()
             .flex()
             .items_center()
-            .bg(rgb(Theme::color(&theme.surface)))
+            .bg(rgb(theme.surface))
             .child(
                 div()
                     .h_full()
                     .px(px(18.0))
                     .flex()
                     .items_center()
-                    .text_color(rgb(Theme::color(&theme.text)))
+                    .text_color(rgb(theme.text))
                     .text_size(px(15.0))
-                    .bg(rgb(Theme::color(&theme.background)))
+                    .bg(rgb(theme.background))
                     .mb(px(-1.0))
                     .pb(px(1.0))
                     .child("inbox")
                     .border_r(px(1.0))
-                    .border_color(rgb(Theme::color(&theme.border))),
+                    .border_color(rgb(theme.border)),
             )
             .child(
                 div()
@@ -36,12 +43,12 @@ impl Render for MailTopBar {
                     .px(px(18.0))
                     .flex()
                     .items_center()
-                    .text_color(rgb(Theme::color(&theme.text_inactive)))
+                    .text_color(rgb(theme.text_inactive))
                     .text_size(px(15.0))
                     .child("starred")
                     .border_b(px(1.0))
                     .border_r(px(1.0))
-                    .border_color(rgb(Theme::color(&theme.border))),
+                    .border_color(rgb(theme.border)),
             )
             .child(
                 div()
@@ -49,12 +56,12 @@ impl Render for MailTopBar {
                     .px(px(18.0))
                     .flex()
                     .items_center()
-                    .text_color(rgb(Theme::color(&theme.text_inactive)))
+                    .text_color(rgb(theme.text_inactive))
                     .text_size(px(15.0))
                     .child("drafts")
                     .border_b(px(1.0))
                     .border_r(px(1.0))
-                    .border_color(rgb(Theme::color(&theme.border))),
+                    .border_color(rgb(theme.border)),
             )
             .child(
                 div()
@@ -62,12 +69,12 @@ impl Render for MailTopBar {
                     .px(px(18.0))
                     .flex()
                     .items_center()
-                    .text_color(rgb(Theme::color(&theme.text_inactive)))
+                    .text_color(rgb(theme.text_inactive))
                     .text_size(px(15.0))
                     .child("sent")
                     .border_b(px(1.0))
                     .border_r(px(1.0))
-                    .border_color(rgb(Theme::color(&theme.border))),
+                    .border_color(rgb(theme.border)),
             )
             .child(
                 div()
@@ -75,12 +82,12 @@ impl Render for MailTopBar {
                     .px(px(18.0))
                     .flex()
                     .items_center()
-                    .text_color(rgb(Theme::color(&theme.text_inactive)))
+                    .text_color(rgb(theme.text_inactive))
                     .text_size(px(15.0))
                     .child("trash")
                     .border_b(px(1.0))
                     .border_r(px(1.0))
-                    .border_color(rgb(Theme::color(&theme.border))),
+                    .border_color(rgb(theme.border)),
             )
             .child(
                 div()
@@ -89,17 +96,17 @@ impl Render for MailTopBar {
                     .flex()
                     .items_center()
                     .text_size(px(20.0))
-                    .text_color(rgb(Theme::color(&theme.text_inactive)))
+                    .text_color(rgb(theme.text_inactive))
                     .child("+")
                     .border_b(px(1.0))
-                    .border_color(rgb(Theme::color(&theme.border))),
+                    .border_color(rgb(theme.border)),
             )
             .child(
                 div()
                     .flex_1()
                     .h_full()
                     .border_b(px(1.0))
-                    .border_color(rgb(Theme::color(&theme.border))),
+                    .border_color(rgb(theme.border)),
             )
             .into_any_element()
     }
