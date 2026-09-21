@@ -7,6 +7,20 @@ pub struct Sidebar {
     pub theme: Entity<Theme>,
 }
 
+impl Sidebar {
+    pub fn new(
+        state: Entity<crate::app::AppState>,
+        theme: Entity<Theme>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        // This view is cached, so it must re-render itself when what it
+        // shows changes.
+        cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        cx.observe(&theme, |_, _, cx| cx.notify()).detach();
+        Self { state, theme }
+    }
+}
+
 impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, root_cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme.read(root_cx).clone();
@@ -29,14 +43,14 @@ impl Render for Sidebar {
                     .px(px(8.0))
                     .py(px(6.0))
                     .text_size(px(12.0))
-                    .text_color(rgb(Theme::color(&theme.text_muted)))
+                    .text_color(rgb(theme.text_muted))
                     .hover(|row| {
-                        row.bg(rgb(Theme::color(&theme.selected_option)))
-                            .text_color(rgb(Theme::color(&theme.text_muted)))
+                        row.bg(rgb(theme.selected_option))
+                            .text_color(rgb(theme.text_muted))
                     })
                     .when(is_selected, |row| {
-                        row.bg(rgb(Theme::color(&theme.selected_option)))
-                            .text_color(rgb(Theme::color(&theme.text)))
+                        row.bg(rgb(theme.selected_option))
+                            .text_color(rgb(theme.text))
                     })
                     .cursor_pointer()
                     .on_click(move |_event, _window, cx| {
@@ -60,9 +74,9 @@ impl Render for Sidebar {
             .h_full()
             .flex()
             .flex_col()
-            .bg(rgb(Theme::color(&theme.surface)))
+            .bg(rgb(theme.surface))
             .border_l(px(1.0))
-            .border_color(rgb(Theme::color(&theme.border)))
+            .border_color(rgb(theme.border))
             .child(
                 div()
                     .w_full()
@@ -75,7 +89,7 @@ impl Render for Sidebar {
                             .items_center()
                             .gap(px(8.0))
                             .text_size(px(14.0))
-                            .text_color(rgb(Theme::color(&theme.text)))
+                            .text_color(rgb(theme.text))
                             .child("Mail")
                             .child(
                                 div()
@@ -85,9 +99,7 @@ impl Render for Sidebar {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .hover(|this| {
-                                        this.bg(rgb(Theme::color(&theme.selected_option)))
-                                    })
+                                    .hover(|this| this.bg(rgb(theme.selected_option)))
                                     .id("add-email")
                                     .cursor_pointer()
                                     .on_click(root_cx.listener(
@@ -103,8 +115,14 @@ impl Render for Sidebar {
                                                     Some("Opening Google login...".to_string());
                                                 cx.notify();
                                             });
+                                            // login() runs an axum server and HTTP calls, so it runs on tokio.
+                                            let io = crate::runtime::spawn(login());
                                             cx.spawn(async move |_this, cx2| {
-                                                match login().await {
+                                                let result = io
+                                                    .await
+                                                    .map_err(anyhow::Error::from)
+                                                    .and_then(|result| result);
+                                                match result {
                                                     Ok(account) => {
                                                         google_state.update(cx2, |state, cx| {
                                                             state.google_accounts.push(account);
@@ -135,8 +153,8 @@ impl Render for Sidebar {
                                     ))
                                     .child(
                                         svg()
-                                            .data(include_bytes!("../../assets/images/add.svg"))
-                                            .text_color(rgb(Theme::color(&theme.text_muted)))
+                                            .path("images/add.svg")
+                                            .text_color(rgb(theme.text_muted))
                                             .w(px(10.0))
                                             .h(px(10.0)),
                                     ),
@@ -147,7 +165,7 @@ impl Render for Sidebar {
                             .ml(px(8.0))
                             .pl(px(14.0))
                             .border_l(px(1.0))
-                            .border_color(rgb(Theme::color(&theme.border)))
+                            .border_color(rgb(theme.border))
                             .children(google_accounts.iter().enumerate().map(
                                 |(index, account)| {
                                     let app_state = self.state.clone();
@@ -159,14 +177,14 @@ impl Render for Sidebar {
                                         .px(px(8.0))
                                         .py(px(6.0))
                                         .text_size(px(12.0))
-                                        .text_color(rgb(Theme::color(&theme.text_muted)))
+                                        .text_color(rgb(theme.text_muted))
                                         .hover(|row| {
-                                            row.bg(rgb(Theme::color(&theme.selected_option)))
-                                                .text_color(rgb(Theme::color(&theme.text_muted)))
+                                            row.bg(rgb(theme.selected_option))
+                                                .text_color(rgb(theme.text_muted))
                                         })
                                         .when(is_selected, |row| {
-                                            row.bg(rgb(Theme::color(&theme.selected_option)))
-                                                .text_color(rgb(Theme::color(&theme.text)))
+                                            row.bg(rgb(theme.selected_option))
+                                                .text_color(rgb(theme.text))
                                         })
                                         .cursor_pointer()
                                         .on_click(root_cx.listener(
@@ -202,7 +220,7 @@ impl Render for Sidebar {
                                 div()
                                     .px(px(8.0))
                                     .text_size(px(11.0))
-                                    .text_color(rgb(Theme::color(&theme.text_muted)))
+                                    .text_color(rgb(theme.text_muted))
                                     .child(status),
                             )
                         },
@@ -220,7 +238,7 @@ impl Render for Sidebar {
                             .items_center()
                             .gap(px(8.0))
                             .text_size(px(14.0))
-                            .text_color(rgb(Theme::color(&theme.text)))
+                            .text_color(rgb(theme.text))
                             .child("Temp Emails")
                             .child(
                                 div()
@@ -230,17 +248,20 @@ impl Render for Sidebar {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .hover(|this| {
-                                        this.bg(rgb(Theme::color(&theme.selected_option)))
-                                    })
+                                    .hover(|this| this.bg(rgb(theme.selected_option)))
                                     .id("generate-email")
                                     .cursor_pointer()
                                     .on_click(root_cx.listener(
                                         move |_this, _event, _window, cx| {
                                             let app_state = temp_email_state.clone();
 
+                                            let io = crate::runtime::spawn(create_account());
                                             cx.spawn(async move |_this, cx2| {
-                                                match create_account().await {
+                                                let result = io
+                                                    .await
+                                                    .map_err(anyhow::Error::from)
+                                                    .and_then(|result| result);
+                                                match result {
                                                     Ok(email) => {
                                                         app_state.update(cx2, |state, cx| {
                                                             state.temp_email.push(email);
@@ -249,7 +270,9 @@ impl Render for Sidebar {
                                                         });
                                                     }
                                                     Err(error) => {
-                                                        println!("Failed: {}", error);
+                                                        eprintln!(
+                                                            "Failed to create temp email: {error:#}"
+                                                        );
                                                     }
                                                 }
                                                 Ok::<(), anyhow::Error>(())
@@ -259,8 +282,8 @@ impl Render for Sidebar {
                                     ))
                                     .child(
                                         svg()
-                                            .data(include_bytes!("../../assets/images/add.svg"))
-                                            .text_color(rgb(Theme::color(&theme.text)))
+                                            .path("images/add.svg")
+                                            .text_color(rgb(theme.text))
                                             .w(px(10.0))
                                             .h(px(10.0)),
                                     ),
@@ -271,7 +294,7 @@ impl Render for Sidebar {
                             .ml(px(8.0))
                             .pl(px(14.0))
                             .border_l(px(1.0))
-                            .border_color(rgb(Theme::color(&theme.border)))
+                            .border_color(rgb(theme.border))
                             .children(temporary_emails),
                     ),
             )

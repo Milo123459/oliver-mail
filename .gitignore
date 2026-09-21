@@ -1,2 +1,5 @@
 /target
 .env
+
+# local app state (saved to ./mailbox/ when APPDATA is unset, e.g. on Linux)
+mailbox/

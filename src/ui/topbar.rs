@@ -11,6 +11,17 @@ pub struct TopBar {
     pub settings_window: Option<WindowHandle<crate::ui::settings::Settings>>,
 }
 
+impl TopBar {
+    pub fn new(theme: Entity<Theme>, state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
+        cx.observe(&theme, |_, _, cx| cx.notify()).detach();
+        Self {
+            theme,
+            state,
+            settings_window: None,
+        }
+    }
+}
+
 impl Render for TopBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme.read(cx).clone();
@@ -20,14 +31,14 @@ impl Render for TopBar {
             .flex_shrink_0()
             .flex()
             .items_center()
-            .bg(rgb(Theme::color(&theme.surface_hover)))
+            .bg(rgb(theme.surface_hover))
             .child(
                 div()
                     .h_full()
                     .px(px(18.0))
                     .flex()
                     .items_center()
-                    .text_color(rgb(Theme::color(&theme.text)))
+                    .text_color(rgb(theme.text))
                     .text_size(px(15.0))
                     .child("MailBox"),
             )
@@ -50,11 +61,11 @@ impl Render for TopBar {
                             .rounded(px(8.0))
                             .flex()
                             .items_center()
-                            .hover(|this| this.bg(rgb(Theme::color(&theme.selected_option))))
+                            .hover(|this| this.bg(rgb(theme.selected_option)))
                             .child(
                                 svg()
-                                    .data(include_bytes!("../../assets/images/settings.svg"))
-                                    .text_color(rgb(Theme::color(&theme.text)))
+                                    .path("images/settings.svg")
+                                    .text_color(rgb(theme.text))
                                     .w(px(15.0))
                                     .h(px(15.0)),
                             )
@@ -108,8 +119,8 @@ impl Render for TopBar {
                             .window_control_area(WindowControlArea::Min)
                             .child(
                                 svg()
-                                    .data(include_bytes!("../../assets/images/minimize.svg"))
-                                    .text_color(rgb(Theme::color(&theme.text)))
+                                    .path("images/minimize.svg")
+                                    .text_color(rgb(theme.text))
                                     .w(px(18.0))
                                     .h(px(18.0)),
                             ),
@@ -126,14 +137,14 @@ impl Render for TopBar {
                             .window_control_area(WindowControlArea::Max)
                             .child(if _window.is_maximized() {
                                 svg()
-                                    .data(include_bytes!("../../assets/images/restore.svg"))
-                                    .text_color(rgb(Theme::color(&theme.text)))
+                                    .path("images/restore.svg")
+                                    .text_color(rgb(theme.text))
                                     .w(px(18.0))
                                     .h(px(18.0))
                             } else {
                                 svg()
-                                    .data(include_bytes!("../../assets/images/maximize.svg"))
-                                    .text_color(rgb(Theme::color(&theme.text)))
+                                    .path("images/maximize.svg")
+                                    .text_color(rgb(theme.text))
                                     .w(px(18.0))
                                     .h(px(18.0))
                             }),
@@ -150,8 +161,8 @@ impl Render for TopBar {
                             .window_control_area(WindowControlArea::Close)
                             .child(
                                 svg()
-                                    .data(include_bytes!("../../assets/images/close.svg"))
-                                    .text_color(rgb(Theme::color(&theme.text)))
+                                    .path("images/close.svg")
+                                    .text_color(rgb(theme.text))
                                     .w(px(18.0))
                                     .h(px(18.0)),
                             ),

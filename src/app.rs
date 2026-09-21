@@ -1,5 +1,6 @@
 use gpui::{
-    App, Context, Entity, TitlebarOptions, Window, WindowOptions, div, prelude::*, px, rgb, size,
+    App, Context, Entity, StyleRefinement, TitlebarOptions, Window, WindowOptions, div, prelude::*,
+    px, rgb, size,
 };
 use std::collections::HashMap;
 
@@ -94,20 +95,11 @@ impl MailApp {
             |_, cx| {
                 let theme = cx.new(|_| Theme::load());
                 let state = cx.new(|_| AppState::from_storage(crate::storage::load()));
-                let sidebar = cx.new(|_| Sidebar {
-                    state: state.clone(),
-                    theme: theme.clone(),
-                });
-                let topbar = cx.new(|_| TopBar {
-                    theme: theme.clone(),
-                    state: state.clone(),
-                    settings_window: None,
-                });
-                let mailtopbar = cx.new(|_| MailTopBar {
-                    theme: theme.clone(),
-                });
+                let sidebar = cx.new(|cx| Sidebar::new(state.clone(), theme.clone(), cx));
+                let topbar = cx.new(|cx| TopBar::new(theme.clone(), state.clone(), cx));
+                let mailtopbar = cx.new(|cx| MailTopBar::new(theme.clone(), cx));
 
-                let email_view = cx.new(|_| EmailView::new(state.clone(), theme.clone()));
+                let email_view = cx.new(|cx| EmailView::new(state.clone(), theme.clone(), cx));
                 let inbox =
                     cx.new(|cx| Inbox::new(state.clone(), email_view.clone(), theme.clone(), cx));
 
@@ -129,20 +121,38 @@ impl MailApp {
 impl Render for MailApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme.read(cx).clone();
+
+        // Child views are cached: each one is only re-rendered when it is
+        // notified (they observe the state/theme they display). Without this,
+        // any hover or click anywhere rebuilt the entire window, email body
+        // included.
         let content = if self.state.read(cx).selected_message.is_some() {
-            self.email_view.clone().into_any_element()
+            self.email_view
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element()
         } else {
-            self.inbox.clone().into_any_element()
+            self.inbox
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element()
         };
 
         div()
             .size_full()
-            .bg(rgb(Theme::color(&theme.background)))
-            .text_color(rgb(Theme::color(&theme.text_muted)))
+            .bg(rgb(theme.background))
+            .text_color(rgb(theme.text_muted))
             .font_family("Lilex")
             .flex()
             .flex_col()
-            .child(self.topbar.clone())
+            .child(
+                self.topbar.clone().cached(
+                    StyleRefinement::default()
+                        .w_full()
+                        .h(px(35.0))
+                        .flex_shrink_0(),
+                ),
+            )
             .child(
                 div()
                     .flex_1()
@@ -154,11 +164,29 @@ impl Render for MailApp {
                             .flex_1()
                             .min_w(px(0.0))
                             .min_h(px(0.0))
+                            // Was missing: without `flex()` the column isn't
+                            // a flex container, so the content area never got
+                            // a height and nothing inside could scroll.
+                            .flex()
                             .flex_col()
-                            .child(self.mailtopbar.clone())
+                            .child(
+                                self.mailtopbar.clone().cached(
+                                    StyleRefinement::default()
+                                        .w_full()
+                                        .h(px(35.0))
+                                        .flex_shrink_0(),
+                                ),
+                            )
                             .child(div().flex_1().w_full().min_h(px(0.0)).child(content)),
                     )
-                    .child(self.sidebar.clone()),
+                    .child(
+                        self.sidebar.clone().cached(
+                            StyleRefinement::default()
+                                .w(px(360.0))
+                                .h_full()
+                                .flex_shrink_0(),
+                        ),
+                    ),
             )
     }
 }
