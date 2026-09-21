@@ -1,1 +1,1 @@
-Mail, A open source mutli compattable mail app.
+MailBox, A open source multi compatible mail app.
