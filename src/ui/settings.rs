@@ -289,7 +289,7 @@ impl Render for Settings {
                                             cx.notify();
                                         });
                                     }))
-                                    .child("Delete all saved mail and accounts"),
+                                    .child("Delete everything"),
                             ),
                     ),
             )

@@ -22,6 +22,7 @@
 //!    `cx.notify()` on it asks gpui to re-render it. Views subscribe to the
 //!    data they show with `cx.observe(...)` so they notify themselves when
 //!    that data changes (see app.rs for why this matters).
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod app;
 mod assets;
 mod html_text;

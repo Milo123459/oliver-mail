@@ -1,17 +1,10 @@
-//! Temporary email addresses from mail.tm (https://docs.mail.tm).
-//!
-//! Errors use `anyhow::Result`. The old `Box<dyn std::error::Error>` can't be
-//! sent between threads, and these functions run on tokio and hand their
-//! results back to the UI thread, so the error type has to be `Send`.
 use anyhow::{Context, Result, bail};
-use rand::{Rng, distr::Alphanumeric};
+use rand::{Rng, distr::Alphanumeric, prelude::IndexedRandom};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-// One email, used for both Gmail and temp mail. `body` is empty until the
-// full message has been fetched; `intro` is the short preview.
 pub struct Email {
     pub id: String,
     pub from: String,
@@ -73,25 +66,37 @@ fn random_string(length: usize) -> String {
         .collect()
 }
 
-// Picks mail.tm's first domain, makes up a random username and password,
-// creates the account and logs in to get a token.
-pub async fn create_account() -> Result<TempEmail> {
+/// Creates a Mail.tm account using explicitly supplied credentials.
+///
+/// Unlike `create_account()`, this does not generate an address or password.
+pub async fn create_account_with_credentials(address: String,password: String,) -> Result<TempEmail> {
     let client = crate::runtime::http();
 
-    let username = random_string(12).to_lowercase();
-    let password = random_string(20);
+    let address = address.trim().to_lowercase();
+    let password = password.to_string();
 
-    let domains_response = client.get("https://api.mail.tm/domains").send().await?;
-    let domains: serde_json::Value = domains_response.json().await?;
-    let domain = domains["hydra:member"][0]["domain"]
-        .as_str()
-        .context("No mail.tm domain available")?;
+    if address.is_empty() {
+        bail!("Email address is required");
+    }
 
-    let address = format!("{}@{}", username, domain);
+    if !address.contains('@') {
+        bail!("Email address must contain '@'");
+    }
+
+    if password.is_empty() {
+        bail!("Password is required");
+    }
+
+    if password.len() < 8 {
+        bail!("Password must be at least 8 characters");
+    }
 
     let response = client
         .post("https://api.mail.tm/accounts")
-        .json(&json!({"address": address,"password": password}))
+        .json(&json!({
+            "address": address,
+            "password": password
+        }))
         .send()
         .await?;
 
@@ -101,6 +106,8 @@ pub async fn create_account() -> Result<TempEmail> {
 
         bail!("Failed to create account: {} - {}", status, body);
     }
+
+    let account: AccountResponse = response.json().await?;
 
     let token_response = client
         .post("https://api.mail.tm/token")
@@ -118,25 +125,66 @@ pub async fn create_account() -> Result<TempEmail> {
         bail!("Failed to login to Mail.tm: {} - {}", status, body);
     }
 
-    let account: AccountResponse = response.json().await?;
-
-    println!("Temporary email created: {}", account.address);
-
-    println!("Account ID: {}", account.id);
-
     let token: TokenResponse = token_response.json().await?;
 
+    println!("Temporary email created: {}", account.address);
+    println!("Account ID: {}", account.id);
     println!("Mail.tm token acquired");
 
     Ok(TempEmail {
-        address,
+        address: account.address,
         password,
         id: account.id,
         token: token.token,
     })
 }
 
-// mail.tm tokens expire, so we log in again to get a fresh one.
+/// Quick Generate.
+///
+/// This keeps the old behaviour used by the sidebar's
+/// "Quick Generate" option.
+pub async fn create_account() -> Result<TempEmail> {
+    let username = random_string(12).to_lowercase();
+    let password = random_string(20);
+
+    let domains = get_domains().await?;
+
+    let domain = domains
+        .choose(&mut rand::rng())
+        .context("No mail.tm domains available")?;
+
+    let address = format!("{}@{}", username, domain);
+
+    create_account_with_credentials(address, password).await
+}
+
+pub async fn get_domains() -> Result<Vec<String>> {
+    let client = crate::runtime::http();
+
+    let response = client
+        .get("https://api.mail.tm/domains")
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+
+        bail!("Failed to retrieve domains: {} - {}", status, body);
+    }
+
+    let domains: serde_json::Value = response.json().await?;
+
+    let domain_list = domains["hydra:member"]
+        .as_array()
+        .context("No mail.tm domains available")?
+        .iter()
+        .filter_map(|domain| domain["domain"].as_str().map(|s| s.to_string()))
+        .collect();
+
+    Ok(domain_list)
+}
+
 async fn get_token(client: &Client, email: &TempEmail) -> Result<String> {
     let response = client
         .post("https://api.mail.tm/token")
@@ -150,6 +198,7 @@ async fn get_token(client: &Client, email: &TempEmail) -> Result<String> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+
         bail!("Failed to login to Mail.tm: {} - {}", status, body);
     }
 
@@ -175,6 +224,7 @@ pub async fn get_mail(email: &TempEmail) -> Result<Vec<Email>> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+
         bail!("Failed to retrieve mail: {} - {}", status, body);
     }
 
@@ -188,8 +238,6 @@ pub async fn get_mail(email: &TempEmail) -> Result<Vec<Email>> {
             from: message.from.address,
             subject: message.subject,
             intro: message.intro.unwrap_or_default(),
-            // mail.tm's message list only includes a preview (`intro`), not the
-            // full body, so temp emails currently only show the preview.
             body: String::new(),
             seen: message.seen,
             starred: false,

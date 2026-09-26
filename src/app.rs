@@ -5,7 +5,7 @@ use gpui::{
 use std::collections::HashMap;
 
 use crate::models::{Email, GoogleAccount, TempEmail, Theme};
-use crate::ui::{EmailView, Inbox, MailTopBar, Sidebar, TopBar};
+use crate::ui::{EmailView, Inbox, MailTopBar, Popout, Sidebar, TopBar};
 
 // The root view of the window. It owns a handle to every child view plus the
 // shared state and theme.
@@ -22,6 +22,7 @@ pub struct MailApp {
     pub email_view: Entity<EmailView>,
     pub state: Entity<AppState>,
     pub theme: Entity<Theme>,
+    pub popout: Entity<Popout>,
 }
 
 // Data shared by every view: accounts, cached mail, what's selected.
@@ -140,7 +141,8 @@ impl MailApp {
             |_, cx| {
                 let theme = cx.new(|_| Theme::load());
                 let state = cx.new(|_| AppState::from_storage(crate::storage::load()));
-                let sidebar = cx.new(|cx| Sidebar::new(state.clone(), theme.clone(), cx));
+                let popout = cx.new(|cx| Popout::new(theme.clone(), state.clone(), cx));
+                let sidebar = cx.new(|cx| Sidebar::new(state.clone(), theme.clone(), popout.clone(), cx));
                 let topbar = cx.new(|cx| TopBar::new(theme.clone(), state.clone(), cx));
                 let mailtopbar = cx.new(|cx| MailTopBar::new(state.clone(), theme.clone(), cx));
 
@@ -158,6 +160,7 @@ impl MailApp {
                     email_view,
                     state,
                     theme,
+                    popout,
                 })
             },
         )
@@ -271,5 +274,6 @@ impl Render for MailApp {
                         ),
                     ),
             )
+                    .child(self.popout.clone())
     }
 }
