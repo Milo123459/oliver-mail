@@ -5,6 +5,16 @@ use gpui::{
 use crate::app::AppState;
 use crate::models::{Theme, create_account_with_credentials, get_domains};
 
+// Focus ring for the two text inputs.
+//
+// Deliberately not a theme colour: none of the shipped themes have an accent
+// slot. Their `selected` is a selection *background* (`#181818` on dark,
+// `#E4E7EB` on light and zed), so reusing it would make the focused field flash
+// near-black or near-white. A mid blue reads as "this one has the keyboard"
+// against both the dark and the light themes, and 0x3b82f6 keeps roughly a 3:1
+// contrast ratio against #1e1e1e, so the ring stays visible for low vision.
+const FOCUS_RING: u32 = 0x3b82f6;
+
 pub struct Popout {
     pub theme: gpui::Entity<Theme>,
     pub state: gpui::Entity<AppState>,
@@ -37,6 +47,23 @@ impl Popout {
             domain_menu_open: false,
             error: None,
             generating: false,
+        }
+    }
+
+    /// True while the "Custom Generate" panel is showing. `MailApp` reads this
+    /// to decide whether to draw the dimmed backdrop.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
+    /// Close the panel and any dropdown inside it. Called when the user clicks
+    /// the backdrop.
+    pub fn close(&mut self, cx: &mut Context<Self>) {
+        if self.open || self.domain_menu_open {
+            self.open = false;
+            self.domain_menu_open = false;
+            self.error = None;
+            cx.notify();
         }
     }
 
@@ -255,10 +282,17 @@ impl Focusable for Popout {
 impl Render for Popout {
     fn render(
         &mut self,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = self.theme.read(cx).clone();
+
+        // Which text input currently has the keyboard. Read here rather than
+        // with a `when_focused` style because the email field's focusable
+        // element is a *child* of the box that draws the border, so the ring has
+        // to be driven by the container.
+        let email_focused = self.email_focus.is_focused(window);
+        let password_focused = self.password_focus.is_focused(window);
 
         let email_value = if self.email_value.is_empty() {
             "username".to_string()
@@ -330,8 +364,21 @@ impl Render for Popout {
                                 .flex()
                                 .items_center()
                                 .bg(rgb(theme.background))
-                                .border_1()
-                                .border_color(rgb(theme.border))
+                                // Thicker as well as coloured, so the ring is
+                                // obvious even if the colours are close. The box
+                                // has a fixed height and centres its contents, so
+                                // the extra pixel does not shift the text.
+                                .when(
+                                    email_focused,
+                                    |this| {
+                                        this.border_2()
+                                            .border_color(rgb(FOCUS_RING))
+                                    },
+                                )
+                                .when(!email_focused, |this| {
+                                    this.border_1()
+                                        .border_color(rgb(theme.border))
+                                })
                                 .rounded(px(5.0))
                                 .child(
                                     div()
@@ -434,6 +481,13 @@ impl Render for Popout {
                                                                     )
                                                                     .shadow_lg()
                                                                     .occlude()
+                                                                    // Clicking anywhere outside this dropdown -- but still inside the
+                                                                    // modal -- closes just the dropdown. The backdrop in app.rs
+                                                                    // handles clicks outside the modal itself.
+                                                                    .on_mouse_down_out(cx.listener(|popout, _, _, cx| {
+                                                                        popout.domain_menu_open = false;
+                                                                        cx.notify();
+                                                                    }))
                                                                     .children(
                                                                         self.domains
                                                                             .iter()
@@ -526,8 +580,14 @@ impl Render for Popout {
                                 .items_center()
                                 .px(px(10.0))
                                 .bg(rgb(theme.background))
-                                .border_1()
-                                .border_color(rgb(theme.border))
+                                .when(password_focused, |this| {
+                                    this.border_2()
+                                        .border_color(rgb(FOCUS_RING))
+                                })
+                                .when(!password_focused, |this| {
+                                    this.border_1()
+                                        .border_color(rgb(theme.border))
+                                })
                                 .rounded(px(5.0))
                                 .text_size(px(13.0))
                                 .text_color(rgb(password_color))

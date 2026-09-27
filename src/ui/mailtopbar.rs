@@ -21,7 +21,6 @@ impl Render for MailTopBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme.read(cx).clone();
         let selected_filter = self.state.read(cx).mail_filter;
-        let state = self.state.clone();
 
         div()
             .w_full()
@@ -30,11 +29,6 @@ impl Render for MailTopBar {
             .flex()
             .items_center()
             .bg(rgb(theme.surface))
-            .on_mouse_move(move |_event, _window, cx| {
-                state.update(cx, |_state, cx| {
-                    cx.notify();
-                });
-            })
             .child(
                 div()
                     .id("back-to-inbox")
@@ -54,6 +48,14 @@ impl Render for MailTopBar {
                     } else {
                         theme.surface
                     }))
+                    // Hover feedback is only styled on the unselected tabs, so the
+                    // active one keeps its solid background. `.hover()` is a style
+                    // refinement gpui applies on enter/exit, so it re-renders this
+                    // small bar and nothing else (see app.rs on `.cached`).
+                    .when(selected_filter != MailFilter::Inbox, |this| {
+                        this.hover(|this| this.bg(rgb(theme.surface_hover)))
+                            .text_color(rgb(theme.text))
+                    })
                     .mb(px(if selected_filter == MailFilter::Inbox { -1.0 } else { 0.0 }))
                     .pb(px(if selected_filter == MailFilter::Inbox { 1.0 } else { 0.0 }))
                     .child("inbox")
@@ -87,6 +89,10 @@ impl Render for MailTopBar {
                     } else {
                         theme.surface
                     }))
+                    .when(selected_filter != MailFilter::Starred, |this| {
+                        this.hover(|this| this.bg(rgb(theme.surface_hover)))
+                            .text_color(rgb(theme.text))
+                    })
                     .mb(px(if selected_filter == MailFilter::Starred { -1.0 } else { 0.0 }))
                     .pb(px(if selected_filter == MailFilter::Starred { 1.0 } else { 0.0 }))
                     .child("starred")
@@ -120,6 +126,10 @@ impl Render for MailTopBar {
                     } else {
                         theme.surface
                     }))
+                    .when(selected_filter != MailFilter::Drafts, |this| {
+                        this.hover(|this| this.bg(rgb(theme.surface_hover)))
+                            .text_color(rgb(theme.text))
+                    })
                     .mb(px(if selected_filter == MailFilter::Drafts { -1.0 } else { 0.0 }))
                     .pb(px(if selected_filter == MailFilter::Drafts { 1.0 } else { 0.0 }))
                     .child("drafts")
@@ -154,6 +164,10 @@ impl Render for MailTopBar {
                     } else {
                         theme.surface
                     }))
+                    .when(selected_filter != MailFilter::Sent, |this| {
+                        this.hover(|this| this.bg(rgb(theme.surface_hover)))
+                            .text_color(rgb(theme.text))
+                    })
                     .mb(px(if selected_filter == MailFilter::Sent { -1.0 } else { 0.0 }))
                     .pb(px(if selected_filter == MailFilter::Sent { 1.0 } else { 0.0 }))
                     .child("sent")
@@ -188,6 +202,10 @@ impl Render for MailTopBar {
                     } else {
                         theme.surface
                     }))
+                    .when(selected_filter != MailFilter::Trash, |this| {
+                        this.hover(|this| this.bg(rgb(theme.surface_hover)))
+                            .text_color(rgb(theme.text))
+                    })
                     .mb(px(if selected_filter == MailFilter::Trash { -1.0 } else { 0.0 }))
                     .pb(px(if selected_filter == MailFilter::Trash { 1.0 } else { 0.0 }))
                     .child("trash")

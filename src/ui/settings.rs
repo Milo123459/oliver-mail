@@ -242,6 +242,21 @@ impl Render for Settings {
                                     .border_1()
                                     .border_color(rgb(theme.border))
                                     .cursor_pointer()
+                                    .hover(|this| this.bg(rgb(theme.surface_hover)))
+                                    // The settings view lives in its own window, so it
+                                    // has no backdrop to click. Close the dropdown from
+                                    // the click instead. The selector's own hitbox
+                                    // encloses the option list (it is its child), so
+                                    // choosing a theme is not treated as "outside".
+                                    .on_mouse_down_out(cx.listener(
+                                        |settings, _, _, cx| {
+                                            if settings.theme_dropdown_open {
+                                                settings.theme_dropdown_open =
+                                                    false;
+                                                cx.notify();
+                                            }
+                                        },
+                                    ))
                                     .on_click(cx.listener(|settings, _, _, cx| {
                                         settings.theme_dropdown_open =
                                             !settings.theme_dropdown_open;
@@ -281,6 +296,7 @@ impl Render for Settings {
                                             state.selected_message = None;
                                             state.selected_sidebar_email = None;
                                             state.google_login_status = None;
+                                            state.temp_info_open = None;
                                             // The inbox observes `state`, sees nothing is selected any more and
                                             // cancels its background work. Because accounts are now looked up
                                             // by email instead of index, a request that finishes after this
