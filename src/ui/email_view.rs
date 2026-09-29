@@ -81,8 +81,13 @@ impl HtmlBody {
 }
 
 async fn download_image(url: String) -> Option<Arc<Image>> {
-    let response = crate::runtime::http()
-        .get(&url)
+    // The URL comes from the email, so only fetch public addresses.
+    let url = reqwest::Url::parse(&url).ok()?;
+    if !crate::runtime::is_public_url(&url) {
+        return None;
+    }
+    let response = crate::runtime::http_public()
+        .get(url)
         // Some image hosts refuse requests without a browser-like user agent.
         .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Macintosh) mailbox")
         .send()
